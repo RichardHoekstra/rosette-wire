@@ -1,59 +1,88 @@
 # Rosette Wire
 
-Rosette is a language and runtime for building typed Components, composing
-them into bounded programs, and checking their execution evidence.
-A Component declares its Ports, effects, capabilities, and verifiers; a
-Composition connects those contracts into an executable workflow.
+**Give computations a contract that other tools can execute and check.**
 
-The goal is to make powerful computation useful to scientists, engineers, and
-the agents working with them: understandable workflows, explicit assumptions,
-and results that can be independently checked. Eshkol is an independent
-execution backend, Moonlab a quantum laboratory, and Rose the developer
-workbench around the shared contracts.
+Rosette is a component protocol and runtime toolkit for building scientific
+software. Describe an operation's inputs, outputs, effects, capabilities, and
+required evidence; connect operations into a workflow; then execute it and
+verify the resulting receipt.
 
-This preview is a readable Common Lisp/ASDF distribution running on **SBCL**.
-It integrates with Eshkol through an optional execution adapter; it is not yet
-an Eshkol-native application framework. No model or external service is needed
-for the default development loop.
+Use Rosette when you're **building a tool, adapter, or execution backend** that
+needs to cooperate with other implementations. For an experiment workbench and
+visual inspection, start with
+[Rose Workbench](https://github.com/RichardHoekstra/rose-workbench).
 
-## Start here
+## The contract
 
-Requirements: SBCL with ASDF, GNU Make, and Bash.
+A **Component** declares what an operation accepts, produces, and needs.
+A **Composition** connects components through typed ports and declares the
+execution bounds. A **receipt** records what happened. Registered verifiers
+check the required evidence against that composition.
+
+These contracts give an application and its agents a common boundary: explicit
+inputs and permissions, structured failures, and results that can be checked
+again. Implementations stay in their owning projects.
+
+## Try the protocol
+
+Requirements: SBCL with ASDF, GNU Make, and Bash. From this checkout:
 
 ```sh
 sbcl --script examples/verified-program.lisp run /tmp/rosette-demo
+bin/rosette describe /tmp/rosette-demo/composition.json
+bin/rosette validate /tmp/rosette-demo/composition.json
 sbcl --script examples/verified-program.lisp replay /tmp/rosette-demo
 ```
 
-The example executes a real program, saves its Composition and receipt, and
-reruns its verifier in a fresh process. The [walkthrough](docs/quickstart.md)
-also demonstrates a deliberately wrong answer being refused.
+The example writes `composition.json`, `receipt.json`, and `verification.json`.
+Its program computes `factorial(6) = 720`; its verifier checks the result using
+the direct evaluator and an independently lowered kernel VM. Replay reloads
+the saved composition and receipt in a fresh process and runs the verifier.
 
-## Build together
+Read [the example's handler and verifier](examples/verified-program.lisp) to
+see the integration points. The [protocol walkthrough](docs/quickstart.md)
+shows how a well-typed but incorrect result is refused and explains explicit
+handler registration for the CLI.
 
-Start with the example's explicit handler and verifier. Keep implementations
-in their owning projects and exchange contracts and evidence through Ports.
-Read the [interoperability guide](docs/interop.md) for the current
-[Eshkol](https://github.com/tsotchke/eshkol) and
-[Moonlab](https://github.com/tsotchke/moonlab) boundaries.
+## Connect independent tools
+
+- **Eshkol:** an execution adapter emits the admitted integer program dialect
+  and compares direct evaluation, the kernel VM, native JIT, and AOT execution.
+- **Moonlab:** circuit data crosses a public ABI boundary; an independent
+  quantum VM supplies a state-vector oracle. The included C probe uses
+  Moonlab's public symbols.
+- **Your implementation:** declare its operation and register its handler and
+  verifier. Missing permissions or required evidence produce explicit refusals.
+
+The [integration guide](docs/interop.md) includes actual native examples for
+Eshkol and Moonlab, with portable evidence and a second native run to check
+reproducibility. Each comparison has an explicit numeric or circuit regime.
+
+Beyond these adapters, the [system reference](docs/systems.md) covers Wire
+framing, composition validation, circuit interchange, media projections,
+capability-bounded work claims, and the other admitted building blocks.
+
+## Build a component
+
+Start by changing the example's operation and handler. Specify the independent
+check your result needs, then include a failing case that the check must reject.
 
 ```sh
+tools/test-system front-door
 make contributor-check
 ```
 
-PRs are welcome at [rosette-wire](https://github.com/RichardHoekstra/rosette-wire). [CONTRIBUTING.md](CONTRIBUTING.md) covers
-ordinary source changes, new adapters, tests, and the maintainer-assisted path
-for generated files. The [system reference](docs/systems.md) links the exact
-81 exported ASDF systems and their readable source and tests.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers adapter and protocol PRs, new examples,
+and the route for shared improvements to return upstream and reach related
+exports. The public Common Lisp/ASDF source is readable and editable.
 
-## Release boundary
+## Scope and license
 
-This is pre-1.0 software. The source repository is a compiled Apache-2.0
-distribution with stable public names; optimization artifacts do not replace
-the editable source contract. Shared improvements are integrated upstream and
-regenerated into every affected export. See [architecture](docs/architecture.md),
-[provenance](release/PROVENANCE.md), and [security reporting](SECURITY.md).
+This pre-1.0 runtime uses **SBCL**. Eshkol and Moonlab are independent optional
+backends. A verified receipt means its declared checks passed; the strength
+of that conclusion depends on those checks and their stated domain.
 
-`make release-check` checks the exact sealed export, including the full test
-suite, independent tree identity, reproducible archives, and a filesystem-isolated
-clean room. It intentionally rejects a modified contributor checkout.
+Apache-2.0. See [architecture](docs/architecture.md),
+[export provenance](release/PROVENANCE.md), and [security reporting](SECURITY.md).
+`make release-check` verifies a sealed export; use `make contributor-check`
+for a working checkout with source changes.

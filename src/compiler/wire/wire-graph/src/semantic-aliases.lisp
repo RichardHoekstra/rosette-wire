@@ -1,0 +1,80 @@
+;;;; semantic-aliases.lisp --- canonical Component/Composition grammar.
+
+(in-package #:rosette-wire)
+
+;; V0 serialized identities stay stable during the source migration. A later
+;; schema version can change the media names without pretending old identities
+;; survived. These constants therefore name the current compatibility schemas.
+(defparameter +component-schema+ +wire-schema+)
+(defparameter +composition-schema+ +graph-schema+)
+
+(deftype component-field () 'wire-field)
+(defun component-field-p (value) (wire-field-p value))
+(defun component-field-name (value) (wire-field-name value))
+(defun component-field-type (value) (wire-field-type value))
+(defun make-component-field (name type) (make-wire-field name type))
+
+(deftype component-operation () 'wire-operation)
+(defun component-operation-p (value) (wire-operation-p value))
+(defun component-operation-name (value) (wire-operation-name value))
+(defun component-operation-inputs (value) (wire-operation-inputs value))
+(defun component-operation-output (value) (wire-operation-output value))
+(defun make-component-operation (name inputs output)
+  (make-wire-operation name inputs output))
+
+(deftype port () 'wire-port)
+(defun port-p (value) (wire-port-p value))
+(defun port-name (value) (wire-port-name value))
+(defun port-operations (value) (wire-port-operations value))
+(defun make-port (name operations) (make-wire-port name operations))
+
+(deftype component-descriptor () 'wire-descriptor)
+(defun component-descriptor-p (value) (wire-descriptor-p value))
+(defun component-descriptor-name (value) (wire-descriptor-name value))
+(defun component-descriptor-version (value) (wire-descriptor-version value))
+(defun component-descriptor-imports (value) (wire-descriptor-imports value))
+(defun component-descriptor-exports (value) (wire-descriptor-exports value))
+(defun component-descriptor-effects (value) (wire-descriptor-effects value))
+(defun component-descriptor-capabilities (value)
+  (wire-descriptor-capabilities value))
+(defun component-descriptor-adapter (value) (wire-descriptor-adapter value))
+(defun component-descriptor-verifiers (value)
+  (wire-descriptor-verifiers value))
+(defun make-component-descriptor (&rest arguments)
+  (apply #'make-wire-descriptor arguments))
+(defun component-descriptor->value (value) (wire-descriptor->value value))
+(defun component-contract-id (value) (wire-contract-id value))
+
+(deftype component-node () 'wire-node)
+(defun component-node-p (value) (wire-node-p value))
+(defun component-node-id (value) (wire-node-id value))
+(defun component-node-descriptor (value) (wire-node-descriptor value))
+(defun make-component-node (id descriptor implementation-id
+                            &key dependency-set-id)
+  (make-wire-node id descriptor implementation-id
+                  :dependency-set-id dependency-set-id))
+
+(deftype composition () 'wire-graph)
+(defun composition-p (value) (wire-graph-p value))
+(defun composition-name (value) (wire-graph-name value))
+(defun composition-nodes (value) (wire-graph-nodes value))
+(defun composition-steps (value) (wire-graph-steps value))
+(defun make-composition (&rest arguments) (apply #'make-wire-graph arguments))
+(defun composition->value (value) (wire-graph->value value))
+(defun composition-id (value) (wire-graph-id value))
+(defun validate-composition (value) (validate-wire-graph value))
+(defun plan-composition (value) (plan-wire-graph value))
+
+(deftype composition-runner () 'wire-runner)
+(defun composition-runner-p (value) (wire-runner-p value))
+(defun make-composition-runner () (make-wire-runner))
+(defun register-component-handler (runner node port operation function)
+  (register-wire-handler runner node port operation function))
+(defun register-component-verifier (runner name function)
+  (register-wire-verifier runner name function))
+(defun run-composition (composition runner inputs)
+  (run-wire-graph composition runner inputs))
+(defun verify-composition-receipt (composition receipt runner)
+  (verify-wire-receipt composition receipt runner))
+(defun certify-composition (composition runner inputs)
+  (certify-wire-graph composition runner inputs))

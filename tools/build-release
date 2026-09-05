@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+out=${1:-"$root/dist"}
+version=0.1.0-rc.3
+product=rosette-wire
+package="$product-$version"
+stage=$(mktemp -d)
+trap 'rm -rf -- "$stage"' EXIT
+mkdir -p "$out" "$stage/$package"
+archive="$out/$package.tar.gz"
+tar --exclude=.git --exclude=dist -C "$root" -cf - . | tar -C "$stage/$package" -xf -
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$stage" -cf - "$package" | gzip -n >"$archive"
+(cd "$out" && sha256sum "$package.tar.gz" >"$package.tar.gz.sha256")
+printf '%s\n' "$archive"

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+a=$(mktemp -d)
+b=$(mktemp -d)
+trap 'rm -rf -- "$a" "$b"' EXIT
+"$root/tools/build-release" "$a" >/dev/null
+"$root/tools/build-release" "$b" >/dev/null
+cmp "$a/rosette-wire-0.1.0-rc.3.tar.gz" "$b/rosette-wire-0.1.0-rc.3.tar.gz"
+cmp "$a/rosette-wire-0.1.0-rc.3.tar.gz.sha256" "$b/rosette-wire-0.1.0-rc.3.tar.gz.sha256"
+echo 'reproducible-release: PASS'

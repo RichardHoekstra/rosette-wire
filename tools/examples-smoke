@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+sbcl --script "$root/examples/verified-program.lisp" run "$work/good" >/dev/null
+sbcl --script "$root/examples/verified-program.lisp" replay "$work/good" >/dev/null
+status=0
+sbcl --script "$root/examples/verified-program.lisp" mutate "$work/bad" >"$work/mutant.json" || status=$?
+test "$status" -eq 1
+grep -q '"verdict":"fail"' "$work/mutant.json"
+"$root/bin/rosette" validate "$root/examples/minimal-composition.json" >/dev/null
+echo 'examples: PASS (execution, fresh replay, wrong-answer refusal)'

@@ -1,0 +1,135 @@
+;;;; tests.lisp --- Tests for rosette-content-identity.
+
+(defpackage #:rosette-content-identity/tests
+  (:use #:cl
+        #:rosette-assert-core
+        #:rosette-content-identity)
+  (:export #:run-all-tests))
+
+(in-package #:rosette-content-identity/tests)
+
+(defun run-all-tests ()
+  (with-test-run (run "rosette-content-identity")
+    (let ((id (content-id '(:kind :demo :value 42)))
+          (long-id (content-id-long '(:kind :demo :value 42))))
+      (check run (stringp id)
+             "content-id returns a string")
+      (check run (= 16 (length id))
+             "content-id renders as 16 hex digits")
+      (check run (stringp long-id)
+             "content-id-long returns a string")
+      (check run (= 64 (length long-id))
+             "content-id-long renders as 64 hex digits")
+      (check run (string= long-id
+                          (content-id-long '(:kind :demo :value 42)))
+             "equal content has equal long identity")
+      (check run (not (string= long-id
+                               (content-id-long '(:kind :demo :value 43))))
+             "different content changes long identity")
+      (let* ((value '(:nested (("row" 1.25d0) #(2 3))))
+             (legacy
+               (format nil "~(~16,'0x~16,'0x~16,'0x~16,'0x~)"
+                       (rosette-form-core:form-address-of
+                        (list :rosette-content-id/v1 0 value))
+                       (rosette-form-core:form-address-of
+                        (list :rosette-content-id/v1 1 value))
+                       (rosette-form-core:form-address-of
+                        (list :rosette-content-id/v1 2 value))
+                       (rosette-form-core:form-address-of
+                        (list :rosette-content-id/v1 3 value)))))
+        (check run (string= legacy (content-id-long value))
+               "single-traversal long identity preserves every legacy bit"))
+      (check run (string= id (content-id '(:kind :demo :value 42)))
+             "equal content has equal identity")
+      (check run (not (string= id (content-id '(:kind :demo :value 43))))
+             "different content changes identity")
+      (check run (equal (canonical-content-form '(:a 1)) '(:a 1))
+             "canonical-content-form preserves current content form")
+      (check run (content-id-p id)
+             "content-id-p accepts rendered content ids")
+      (check run (content-id-long-p long-id)
+             "content-id-long-p accepts rendered long content ids")
+      (check run (not (content-id-long-p id))
+             "content-id-long-p rejects legacy short ids")
+      (check run (not (content-id-p "payload"))
+             "content-id-p rejects ordinary strings")
+      (check run (string= id (content-id-string id))
+             "content-id-string preserves string ids")
+      (check run (string= long-id (content-id-string-long long-id))
+             "content-id-string-long preserves long string ids")
+      (check run (not (string= long-id (content-id-string-long id)))
+             "legacy short ids are not silently promoted without content")
+      (check run (string= (content-id "payload")
+                          (content-id-string "payload"))
+             "content-id-string hashes non-id strings as content")
+      (check run (not (string= "payload"
+                               (content-id-string "payload")))
+             "ordinary string content is not mistaken for a rendered id")
+      (check run (string= (subseq long-id 0 16)
+                          (content-id-short '(:kind :demo :value 42)))
+             "content-id-short is a prefix of the canonical long identity")
+      (check run (string= (subseq long-id 0 24)
+                          (content-id-short long-id :width 24))
+             "content-id-short accepts already-rendered long identities")
+      (check run (not (string= id
+                               (content-id-short
+                                '(:kind :demo :value 42))))
+             "content-id-short is not the legacy short hash namespace")
+      (check run (handler-case
+                     (progn (content-id-short long-id :width 65) nil)
+                   (error () t))
+             "content-id-short rejects widths beyond the canonical id")
+      (let ((handle (content-id-handle '(:kind :demo :value 42)
+                                       :width 24)))
+        (check run (content-id-handle-p handle)
+               "content-id-handle returns a valid structured display handle")
+        (check run (string= (getf handle :canonical-content-id) long-id)
+               "content-id-handle carries the durable canonical id")
+        (check run (string= (getf handle :short-id)
+                            (subseq long-id 0 24))
+               "content-id-handle carries the selected canonical prefix")
+        (check run (eql (getf handle :short-id-width) 24)
+               "content-id-handle records the selected prefix width")
+        (check run (eq (getf handle :collision-policy) :widen)
+               "content-id-handle defaults to widening ambiguous prefixes")
+        (check run (not (durable-content-id-p (getf handle :short-id)))
+               "content-id-handle short prefix is not durable authority"))
+      (check run (not (content-id-handle-p
+                       (list :canonical-content-id long-id
+                             :short-id (subseq long-id 0 16)
+                             :short-id-width 24
+                             :short-id-algorithm :canonical-prefix
+                             :collision-policy :widen)))
+             "content-id-handle-p rejects mismatched prefix widths")
+      (check run (durable-content-id-p long-id)
+             "durable-content-id-p accepts canonical long identities")
+      (check run (not (durable-content-id-p id))
+             "durable-content-id-p rejects legacy short identities")
+      (check run (legacy-content-id-only-p id)
+             "legacy-content-id-only-p detects short-only handles")
+      (check run (not (legacy-content-id-only-p long-id))
+             "legacy-content-id-only-p rejects canonical long identities")
+      (check run (string= long-id (assert-durable-content-id long-id))
+             "assert-durable-content-id returns accepted canonical ids")
+      (check run (handler-case
+                     (progn (assert-durable-content-id id :replay-edge) nil)
+                   (error () t))
+             "assert-durable-content-id rejects short-only durable references")
+      (check run (handler-case
+                     (progn (assert-durable-content-id
+                             (content-id-short long-id :width 20)
+                             :display-prefix)
+                            nil)
+                   (error () t))
+             "assert-durable-content-id rejects canonical display prefixes")
+      (check run (content-equal-p '(:kind :demo :value 42) id)
+             "content-equal-p accepts content/id pairs")
+      (check run (content-equal-long-p '(:kind :demo :value 42) long-id)
+             "content-equal-long-p accepts content/long-id pairs")
+      (check run (not (content-equal-long-p '(:kind :demo :value 42) id))
+             "content-equal-long-p does not promote legacy short ids")
+      (check run (content-equal-p "payload" (content-id "payload"))
+             "content-equal-p accepts string content/id pairs")
+      (check run (not (content-equal-p '(:kind :demo :value 42)
+                                       '(:kind :demo :value 43)))
+             "content-equal-p distinguishes unequal content"))))

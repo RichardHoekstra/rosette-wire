@@ -1,0 +1,33 @@
+#!/usr/bin/env -S sbcl --script
+
+(require :asdf)
+(require :uiop)
+(defparameter *self* (or *load-truename* *load-pathname*))
+(defparameter *root* (uiop:pathname-parent-directory-pathname (uiop:pathname-directory-pathname *self*)))
+(defparameter *arguments* (uiop:command-line-arguments))
+(unless (= (length *arguments*) 1) (format *error-output* "usage: tools/propose-upstream /absolute/path/to/bundle.sexp~%") (uiop:quit 2))
+(defparameter *output* (pathname (first *arguments*)))
+(unless (eq (first (pathname-directory *output*)) :absolute) (error "output path must be absolute and outside the checkout"))
+(when (uiop:subpathp *output* *root*) (error "output path must be outside the checkout"))
+(when (probe-file *output*) (error "refusing to overwrite existing output: ~A" *output*))
+(asdf:initialize-output-translations '(:output-translations (t "/tmp/rosette-lens-cache/") :ignore-inherited-configuration))
+(asdf:initialize-source-registry `(:source-registry (:tree ,*root*) :ignore-inherited-configuration))
+(asdf:load-system :distribution-lens)
+(let* ((map (ROSETTE-DISTRIBUTION-LENS:read-export-map (merge-pathnames "release/EXPORT-MAP.sexp" *root*)))
+       (export-id (string-trim '(#\Space #\Tab #\Newline #\Return) (uiop:read-file-string (merge-pathnames "release/EXPORT-ID" *root*))))
+       (result (ROSETTE-DISTRIBUTION-LENS:scan-export-tree *root* map export-id)))
+  (if (ROSETTE-DISTRIBUTION-LENS:scan-result-admitted-p result)
+      (let ((bundle (ROSETTE-DISTRIBUTION-LENS:scan-result-bundle result)))
+        (ROSETTE-DISTRIBUTION-LENS:write-change-bundle bundle *output*)
+        (format t "upstream proposal: ~A~%bundle id: ~A~%changes: ~D~%" *output* (ROSETTE-DISTRIBUTION-LENS:change-bundle-id bundle) (length (ROSETTE-DISTRIBUTION-LENS:change-bundle-changes bundle))))
+      (progn
+        (write (list :schema :distribution-scan-refusal/v1
+                     :obstructions
+                     (mapcar (lambda (item)
+                               (list :code (ROSETTE-DISTRIBUTION-LENS:lens-obstruction-code item)
+                                     :path (ROSETTE-DISTRIBUTION-LENS:lens-obstruction-path item)
+                                     :detail (ROSETTE-DISTRIBUTION-LENS:lens-obstruction-detail item)))
+                             (ROSETTE-DISTRIBUTION-LENS:scan-result-obstructions result)))
+               :stream *error-output* :pretty t)
+        (terpri *error-output*)
+        (uiop:quit 2))))

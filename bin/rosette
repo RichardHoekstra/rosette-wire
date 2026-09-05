@@ -1,0 +1,10 @@
+#!/usr/bin/env -S sbcl --script
+(require :asdf)
+(require :uiop)
+(asdf:initialize-output-translations '(:output-translations (t "/tmp/rosette-asdf-cache/") :ignore-inherited-configuration))
+(let* ((self (truename (or *load-truename* *load-pathname*)))
+       (root (uiop:pathname-parent-directory-pathname
+              (uiop:pathname-directory-pathname self))))
+  (asdf:initialize-source-registry `(:source-registry (:tree ,root) :ignore-inherited-configuration))
+  (asdf:load-system :wire-graph))
+(uiop:quit (rosette-wire:rosette-main))

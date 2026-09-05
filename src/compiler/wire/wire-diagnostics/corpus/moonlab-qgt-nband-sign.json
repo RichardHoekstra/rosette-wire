@@ -1,0 +1,47 @@
+{
+  "schema": "rosette-public-regression-bundle/v1",
+  "license": "Apache-2.0",
+  "id": "moonlab-qgt-nband-sign",
+  "upstream": {
+    "repository": "https://github.com/tsotchke/moonlab",
+    "revision": "9bb21b8ad53d50e1f4cb765a00d12e06e74678bc",
+    "abi": [0, 6, 0]
+  },
+  "request": {
+    "protocol": "ROSETTE-MOONLAB-SURFACES/2",
+    "qgt_model": "QWZ",
+    "mass": 1.0,
+    "grid_side": 16,
+    "bands": 2,
+    "occupied_bands": 1,
+    "callback_matrix": [
+      "m+cos(kx)+cos(ky)",
+      "sin(kx)-i*sin(ky)",
+      "sin(kx)+i*sin(ky)",
+      "-(m+cos(kx)+cos(ky))"
+    ]
+  },
+  "observations": {
+    "moonlab_qwz_chern": {
+      "rounded": -1,
+      "raw": -1.0000000000000013
+    },
+    "qgt_berry_grid_nband": {
+      "status": 0,
+      "callback_count": 256,
+      "rounded": 1,
+      "raw": 1.0000000000000004
+    }
+  },
+  "expected_law": "The built-in two-band and public n-band callback paths must agree for the identical Hamiltonian and occupied band.",
+  "result": {
+    "verdict": "counterexample",
+    "earliest_boundary": "moonlab-qgt-callback",
+    "status": "qgt-law"
+  },
+  "replay": {
+    "probe_source": "../tools/moonlab-abi-probe.c",
+    "compile": "cc -std=c11 -O2 -Wall -Wextra -Werror moonlab-abi-probe.c -ldl -lm -o moonlab-abi-probe",
+    "inputs": ["probe executable", "Moonlab shared library", "path-free implementation identity"]
+  }
+}

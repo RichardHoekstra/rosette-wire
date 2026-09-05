@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system>
+    <protection_domain name="srv" priority="20"><program_image path="rawcap_srv.elf" /></protection_domain>
+    <protection_domain name="rawclient" priority="10"><program_image path="rawcap_client.elf" /></protection_domain>
+    <channel><end pd="rawclient" id="0" pp="true" /><end pd="srv" id="0" /></channel>
+</system>

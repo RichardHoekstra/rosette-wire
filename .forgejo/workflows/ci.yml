@@ -1,0 +1,12 @@
+name: ci
+"on": [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  contributor-check:
+    runs-on: docker
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y sbcl bubblewrap make
+      - run: make contributor-check

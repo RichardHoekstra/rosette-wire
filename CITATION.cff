@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use Rosette Wire, cite the software release and its export identity."
+type: software
+title: "Rosette Wire"
+version: "0.1.0-rc.3"
+date-released: 2026-09-01
+authors:
+  - family-names: "Hoekstra"
+    given-names: "Richard"
+license: Apache-2.0

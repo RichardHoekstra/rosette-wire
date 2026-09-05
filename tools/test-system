@@ -1,0 +1,16 @@
+#!/usr/bin/env -S sbcl --script
+(require :asdf)
+(require :uiop)
+(let* ((self (truename (or *load-truename* *load-pathname*)))
+       (root (uiop:pathname-parent-directory-pathname
+              (uiop:pathname-directory-pathname self)))
+       (args (uiop:command-line-arguments)))
+  (unless (= 1 (length args))
+    (format *error-output* "usage: tools/test-system SYSTEM~%")
+    (uiop:quit 2))
+  (asdf:initialize-output-translations
+   '(:output-translations (t "/tmp/rosette-contributor-cache/")
+     :ignore-inherited-configuration))
+  (asdf:initialize-source-registry
+   `(:source-registry (:tree ,root) :ignore-inherited-configuration))
+  (asdf:test-system (first args)))

@@ -1,0 +1,12 @@
+#!/usr/bin/env -S sbcl --script
+
+(require :asdf)
+(require :uiop)
+(defparameter *self* (or *load-truename* *load-pathname*))
+(defparameter *root* (uiop:pathname-parent-directory-pathname (uiop:pathname-directory-pathname *self*)))
+(asdf:initialize-output-translations '(:output-translations (t "/tmp/rosette-export-id-cache/") :ignore-inherited-configuration))
+(asdf:initialize-source-registry `(:source-registry (:tree ,*root*) :ignore-inherited-configuration))
+(asdf:load-system :symmetric-crypto)
+(defun all-files (directory) (append (uiop:directory-files directory) (mapcan #'all-files (uiop:subdirectories directory))))
+(defun excluded-p (relative) (or (string= relative "release/EXPORT-ID") (uiop:string-prefix-p ".git/" relative) (uiop:string-prefix-p "dist/" relative)))
+(let* ((manifest (with-output-to-string (out) (dolist (path (sort (remove-if (lambda (path) (excluded-p (enough-namestring path *root*))) (all-files *root*)) #'string< :key #'namestring)) (let ((relative (enough-namestring path *root*))) (format out "~D:~A~%" (length relative) relative) (write-string (uiop:read-file-string path) out) (terpri out))))) (package (find-package "ROSETTE-SYMMETRIC-CRYPTO")) (function (and package (find-symbol "SHA256-HEX" package))) (actual (and function (funcall function (sb-ext:string-to-octets manifest :external-format :utf-8)))) (expected (string-trim '(#\Space #\Tab #\Newline #\Return) (uiop:read-file-string (merge-pathnames "release/EXPORT-ID" *root*))))) (unless (and actual (string= expected (format nil "sha256:~A" actual))) (error "export identity mismatch: expected ~A, computed sha256:~A" expected actual)) (format t "verify-export-id: PASS (~A)~%" expected))

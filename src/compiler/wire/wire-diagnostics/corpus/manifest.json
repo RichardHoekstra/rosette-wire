@@ -1,0 +1,18 @@
+{
+  "schema": "rosette-regression-corpus/v1",
+  "license": "Apache-2.0",
+  "entries": [
+    {
+      "id": "eshkol-no-stdlib-aot-link",
+      "path": "eshkol-no-stdlib-aot-link.json",
+      "kind": "generated-toolchain-counterexample",
+      "boundary": "aot-compile"
+    },
+    {
+      "id": "moonlab-qgt-nband-sign",
+      "path": "moonlab-qgt-nband-sign.json",
+      "kind": "public-abi-counterexample",
+      "boundary": "moonlab-qgt-callback"
+    }
+  ]
+}

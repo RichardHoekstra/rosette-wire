@@ -1,0 +1,88 @@
+;;;; tests.lisp --- tests for rosette-array-core.
+
+(defpackage #:rosette-array-core/tests
+  (:use #:cl #:rosette-array-core #:rosette-assert-core)
+  (:export #:run-all-tests))
+
+(in-package #:rosette-array-core/tests)
+
+(defun frozen-original-copy-array (array &key element-type)
+  "Frozen pre-rewrite COPY-ARRAY for the self-optimizer oracle.  Do not
+update this when the production implementation changes."
+  (let ((out (make-array (array-dimensions array)
+                         :element-type (or element-type
+                                           (array-element-type array)))))
+    (dotimes (i (array-total-size array) out)
+      (setf (row-major-aref out i) (row-major-aref array i)))))
+
+(defun random-float-array (state)
+  (let* ((rank (1+ (random 2 state)))
+         (dims (if (= rank 1)
+                   (list (+ 1 (random 64 state)))
+                   (list (+ 1 (random 16 state))
+                         (+ 1 (random 16 state)))))
+         (kind (if (zerop (random 2 state)) :f64 :f32))
+         (array (make-f-array kind dims)))
+    (dotimes (i (array-total-size array) array)
+      (setf (row-major-aref array i)
+            (if (eq kind :f64)
+                (- (random 2d0 state) 1d0)
+                (- (random 2.0 state) 1.0))))))
+
+(defun float-bits= (a b)
+  (etypecase a
+    (double-float
+     (= (sb-kernel:double-float-bits a)
+        (sb-kernel:double-float-bits b)))
+    (single-float
+     (= (sb-kernel:single-float-bits a)
+        (sb-kernel:single-float-bits b)))))
+
+(defun array-copy-equivalent-p (a b)
+  (and (equal (array-dimensions a) (array-dimensions b))
+       (equal (array-element-type a) (array-element-type b))
+       (dotimes (i (array-total-size a) t)
+         (unless (float-bits= (row-major-aref a i) (row-major-aref b i))
+           (return-from array-copy-equivalent-p nil)))))
+
+(defun test-copy-array-oracle (run)
+  (let ((state (sb-ext:seed-random-state 20260612))
+        (trials 1000))
+    (dotimes (trial trials)
+      (let* ((array (random-float-array state))
+             (ref (frozen-original-copy-array array))
+             (got (copy-array array)))
+        (check run (array-copy-equivalent-p ref got)
+               (format nil "copy-array oracle trial ~D exact-equivalent" trial)))))
+  (format t "~&  [self-optimizer] copy-array oracle: 1000 random inputs exact-equivalent.~%"))
+
+(defun run-all-tests ()
+  (with-test-run (run "rosette-array-core")
+    (let ((v (make-double-float-array 3 :initial-element 2)))
+      (check run (typep v '(simple-array double-float (3))) "vector element type")
+      (check run (typep v '(f64-array (3))) "f64-array names double-float arrays")
+      (check run (typep v '(f-array :f64 (3))) "f-array names f64 arrays")
+      (check run (typep v '(f-vector :f64 3)) "f-vector names f64 vectors")
+      (check run (eq (float-kind-type :f64) 'double-float) "f64 scalar maps to double-float")
+      (check run (= (aref v 0) 2d0) "initial element coerced"))
+    (check run (= (f-array-storage-bytes :f64 '(2 3)) 48)
+           "f-array-storage-bytes counts f64 matrix storage")
+    (check run (= (f-array-storage-bytes :f32 3) 12)
+           "f-array-storage-bytes accepts vector length dimensions")
+    (let ((v (make-f-array :f32 2 :initial-element 1)))
+      (check run (typep v '(f-vector :f32 2)) "make-f-array allocates f32 vectors")
+      (check run (typep v '(f32-array (2))) "f32-array names single-float arrays")
+      (check run (= (aref v 0) 1.0f0) "f32 initial element coerced"))
+    (let ((v (make-double-float-array 2 :initial-contents '(1d0 2d0))))
+      (check run (typep v '(f64-array (2))) "initial-contents keeps f64 type")
+      (check run (= (aref v 1) 2d0) "initial-contents initializes values"))
+    (check run (equal (shape3 2 3 4) '(2 3 4)) "shape3 returns 3D dimensions")
+    (let ((v (make-single-float-array 2 :initial-element 3)))
+      (check run (typep v '(simple-array single-float (2))) "single-float constructor type")
+      (check run (= (aref v 0) 3.0f0) "single-float constructor coerces initial element"))
+    (let* ((m (make-double-float-array '(2 2)))
+           (copy (copy-array m)))
+      (setf (aref m 1 1) 4d0)
+      (check run (array-same-dimensions-p m copy) "copy preserves dimensions")
+      (check run (= (aref copy 1 1) 0d0) "copy is independent"))
+    (test-copy-array-oracle run)))

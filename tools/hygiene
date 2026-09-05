@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+patterns='(^|[^[:alnum:]])[Rr][Ss][Hh]([^[:alnum:]]|$)|LicenseRef-Proprietary|/home/|/Users/|\.ts\.net|\.forgejo_token'
+if grep -RInE --exclude-dir=.git --exclude=EXPORT-ID --exclude=hygiene "$patterns" "$root"; then
+  echo 'hygiene: forbidden private or garden token found' >&2
+  exit 1
+fi
+count=$(find "$root/src" -name LICENSE -type f -exec cmp -s "$root/LICENSE" {} \; -print | wc -l)
+test "$count" -eq 80
+echo "hygiene: PASS (80 unique Apache-2.0 source directories, including test support)"

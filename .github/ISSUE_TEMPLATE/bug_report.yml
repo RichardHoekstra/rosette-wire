@@ -1,0 +1,27 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Security issue? Stop and follow SECURITY.md instead."
+  - type: input
+    id: version
+    attributes:
+      label: Version and export identity
+      placeholder: "0.1.0-rc.3 / sha256:..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest input and exact commands.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true

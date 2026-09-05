@@ -1,0 +1,37 @@
+#!/usr/bin/env -S sbcl --script
+;;;; Check exported Markdown without network or additional dependencies.
+(require :asdf)
+(require :uiop)
+(defparameter *root*
+  (uiop:pathname-parent-directory-pathname
+   (uiop:pathname-directory-pathname (truename *load-truename*))))
+(defun markdown-files (directory)
+  (append (uiop:directory-files directory "*.md")
+          (loop for child in (uiop:subdirectories directory)
+                unless (member (car (last (pathname-directory child)))
+                               '(".git" "dist") :test #'string=)
+                  append (markdown-files child))))
+(let ((count 0))
+  (dolist (path (markdown-files *root*))
+    (incf count)
+    (let ((text (uiop:read-file-string path)))
+      (dolist (token '("Proprietary" "Chancellor" "check-rosette-lib" "check-rose-lib"))
+        (when (search token text)
+          (error "Internal documentation token ~S in ~A" token path)))
+      (loop with cursor = 0
+            for start = (search "](" text :start2 cursor)
+            while start
+            for end = (position #\) text :start (+ start 2))
+            do (unless end (error "Unclosed Markdown link in ~A" path))
+               (let* ((target (subseq text (+ start 2) end))
+                      (fragment (position #\# target))
+                      (local (if fragment (subseq target 0 fragment) target)))
+                 (unless (or (zerop (length local))
+                             (search "://" local)
+                             (uiop:string-prefix-p "mailto:" local))
+                   (when (or (char= (char local 0) #\/)
+                             (not (probe-file (merge-pathnames local
+                                                              (uiop:pathname-directory-pathname path)))))
+                     (error "Broken or absolute local link ~S in ~A" target path))))
+               (setf cursor (1+ end)))))
+  (format t "docs-check: PASS (~D Markdown files; local links and public vocabulary)~%" count))

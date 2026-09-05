@@ -1,0 +1,83 @@
+# rosette-public-systems-v1
+system	role	path	direct-deps
+array-core	runtime	src/foundation/array/array-core	scalar-core
+blc	runtime	src/proof/blc/blc	
+blc-reduce	runtime	src/compiler/lang/blc-reduce	blc
+browser-artifact	runtime	src/compiler/browser/browser-artifact	
+byte-core	runtime	src/foundation/byte/byte-core	
+causal-frontier	verifier	src/control/causal/causal-frontier	game-protocol
+causal-repartition	verifier	src/control/causal/causal-repartition	causal-frontier
+ccc	runtime	src/math/categorical/ccc/ccc	
+chain-complex	runtime	src/math/categorical/chain/chain-complex	exact-linear-subquotient|smith-normal-form
+chemical-formula	runtime	src/chemistry/chemical/chemical-formula	
+chemical-thermo	runtime	src/chemistry/chemical/chemical-thermo	process-engineering|reaction-network
+chemistry-composition	runtime	src/chemistry/rosette/chemistry-composition	chemical-formula|chemical-thermo|expert-components|process-engineering|reaction-balancer|reaction-network|wire-graph
+claim-referee	runtime	src/proof/claim/claim-referee	scalar-core
+composition-interaction	verifier	src/compiler/wire/composition-interaction	foundation-rewrite|sharing-reduction|wire-graph
+composition-namespace	adapter	src/compiler/wire/composition-namespace	content-identity|json|symmetric-crypto|wire-graph
+composition-sel4	adapter	src/compiler/wire/composition-sel4	content-identity|sel4-cap|sel4-verify|wire-graph
+compression-codec	runtime	src/foundation/compression/compression-codec	
+confluence-frontier	verifier	src/control/confluence/confluence-frontier	causal-frontier
+confluent-reducer	verifier	src/compiler/confluent/confluent-reducer	causal-frontier|causal-repartition|confluence-frontier|core-term|proof-witness
+content-identity	runtime	src/foundation/identity/content-identity	form-core
+core-term	runtime	src/compiler/rep/core-term	gpu-kernel-dsl|gpu-kernel-dsl/cpu|lisp-codegen|proof-carrier-core|proof-witness
+cubical-core	runtime	src/math/categorical/cubical/cubical-core	hott-core
+distributed-work-claim	verifier	src/compiler/work/distributed-work-claim	proof-witness|symmetric-crypto|wire-graph|work-scheduler
+distribution-compiler	runtime	src/compiler/distribution/distribution-compiler	ship|symmetric-crypto|toml
+distribution-composition	adapter	src/compiler/distribution/distribution-composition	distribution-compiler|wire-graph
+distribution-lens	runtime	src/compiler/distribution/distribution-lens	content-identity|symmetric-crypto
+egraph	runtime	src/compiler/egraph/egraph	form-core
+egraph-saturate	runtime	src/compiler/egraph/egraph-saturate	egraph|form-core|proof-witness
+exact-linear-subquotient	runtime	src/math/algebra/exact/linear/exact-linear-subquotient	
+expert-components	verifier	src/compiler/wire/expert-components	proof-witness|wire-graph
+expression-core	runtime	src/compiler/expression/expression-core	
+form-core	runtime	src/compiler/rep/form-core	
+foundation-rewrite	runtime	src/math/categorical/foundation/foundation-rewrite	
+front-door	runtime	src/compiler/front/front-door	blc|blc-reduce|ccc|core-term|expression-core|program-ir|proof-witness
+front-door/eshkol	adapter	src/compiler/front/front-door	content-identity|front-door|isolated-worker|program-ir|tool-envelope
+game-protocol	runtime	src/control/game/game-protocol	
+gpu-kernel-dsl	runtime	src/ml/gpu/kernel/gpu-kernel-dsl	
+gpu-kernel-dsl/cpu	runtime	src/ml/gpu/kernel/gpu-kernel-dsl	gpu-kernel-dsl
+graph-algorithms	runtime	src/foundation/graph/graph-algorithms	graph-core|union-find-core
+graph-core	runtime	src/foundation/graph/graph-core	array-core
+hott-core	runtime	src/math/categorical/hott/hott-core	
+hyper-dual	quantum	src/math/numeric/hyper/hyper-dual	probability-core|scalar-core
+isolated-worker	adapter	src/compiler/isolated/isolated-worker	content-identity|tool-envelope
+json	runtime	src/compiler/json/json	
+lisp-codegen	runtime	src/compiler/lang/lisp-codegen	lisp-objects
+lisp-objects	runtime	src/compiler/lang/lisp-objects	
+media-profile	runtime	src/compiler/wire/media-profile	compression-codec|json|net-frame|raster-core|scene-ir|wire-graph
+metadata-core	runtime	src/foundation/metadata/metadata-core	
+net-frame	runtime	src/foundation/network/net-frame	byte-core
+port-equivalence	verifier	src/compiler/wire/port-equivalence	cubical-core|hott-core|wire-graph
+probability-core	quantum	src/math/numeric/probability/probability-core	scalar-core
+process-engineering	runtime	src/chemistry/reaction/process-engineering	chemical-formula|scalar-core
+program-ir	runtime	src/compiler/rep/program-ir	metadata-core
+proof-carrier-core	verifier	src/proof/proof-system/carrier/proof-carrier-core	metadata-core
+proof-witness	verifier	src/proof/proof-system/proof-witness	metadata-core
+quantum-ir	quantum	src/compiler/lang/quantum-ir	program-ir|substructural
+quantum-vm	quantum	src/math/numeric/quantum/quantum-vm	hyper-dual|quantum-ir
+raster-core	runtime	src/math/geometry/raster/raster-core	byte-core
+reaction-balancer	runtime	src/chemistry/reaction/reaction-balancer	process-engineering
+reaction-network	runtime	src/chemistry/reaction/reaction-network	process-engineering
+scalar-core	quantum	src/foundation/scalar/scalar-core	
+scene-ir	runtime	src/math/geometry/scene/scene-ir	raster-core|vector-font
+sel4-cap	runtime	src/control/sel4/sel4-cap	
+sel4-verify	runtime	src/math/categorical/sel4/sel4-verify	chain-complex
+sexpr-dag	runtime	src/compiler/sexpr/sexpr-dag	graph-core|scalar-core|string-escape
+sharing-reduction	runtime	src/compiler/sharing/sharing-reduction	blc|form-core|foundation-rewrite|sexpr-dag
+ship	runtime	src/compiler/ship/ship	browser-artifact|content-identity|egraph|proof-witness|sound-self-rewrite
+smith-normal-form	runtime	src/math/algebra/smith/normal/smith-normal-form	
+sound-self-rewrite	runtime	src/compiler/sound/self/sound-self-rewrite	claim-referee|egraph-saturate|unification
+string-escape	runtime	src/foundation/string/string-escape	
+substructural	quantum	src/proof/logic/substructural	
+symmetric-crypto	runtime	src/foundation/crypto/symmetric-crypto	
+toml	runtime	src/compiler/toml/toml	
+tool-envelope	adapter	src/compiler/tool/tool-envelope	metadata-core
+unification	runtime	src/compiler/unification/unification	
+union-find-core	runtime	src/foundation/union-find/union-find-core	
+vector-font	runtime	src/math/geometry/vector/vector-font	
+wire-diagnostics	verifier	src/compiler/wire/wire-diagnostics	content-identity|front-door/eshkol|json|quantum-ir|quantum-vm|wire-graph
+wire-graph	verifier	src/compiler/wire/wire-graph	graph-algorithms|graph-core|json|symmetric-crypto|wire-protocol
+wire-protocol	runtime	src/compiler/wire/wire-protocol	symmetric-crypto
+work-scheduler	runtime	src/compiler/work/work-scheduler	graph-core|proof-witness|scalar-core

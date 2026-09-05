@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+version=$(tr -d '\r\n' <"$root/release/VERSION")
+expected=0.1.0-rc.3
+product=rosette-wire
+package="$product-$version"
+fail() { echo "publication-check: $*" >&2; exit 1; }
+test "$version" = "$expected" || fail "version drift: $version != $expected"
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || fail 'VERSION is not semantic'
+case "$version" in *-dev*|*SNAPSHOT*) fail 'development version cannot be published' ;; esac
+required=(README.md LICENSE NOTICE CHANGELOG.md CONTRIBUTING.md SECURITY.md SUPPORT.md GOVERNANCE.md CODE_OF_CONDUCT.md CITATION.cff RELEASING.md Makefile release/VERSION release/SOURCE-CUT release/DISTRIBUTION-ID release/EXPORT-MAP.sexp release/EXPORT-ID release/PROVENANCE.md docs/quickstart.md docs/architecture.md docs/release-model.md .github/workflows/ci.yml .github/workflows/release.yml .forgejo/workflows/ci.yml .forgejo/workflows/release.yml)
+for relative in "${required[@]}"; do test -s "$root/$relative" || fail "missing required file: $relative"; done
+for tool in build-release clean-room cli-smoke docs-check examples-smoke hygiene propose-upstream publication-check reproducible-release test-system verify-export-id verify-systems; do test -x "$root/tools/$tool" || fail "tool is not executable: tools/$tool"; done
+if grep -RInE 'CHANGEME|TO[ -]?DO|TBD|example\.com' "$root/README.md" "$root/CHANGELOG.md" "$root/CONTRIBUTING.md" "$root/SECURITY.md" "$root/SUPPORT.md" "$root/GOVERNANCE.md" "$root/RELEASING.md" "$root/docs" "$root/.github" "$root/.forgejo"; then fail 'unresolved publication placeholder'; fi
+"$root/tools/hygiene" >/dev/null
+sbcl --script "$root/tools/verify-export-id" >/dev/null
+out=$(mktemp -d)
+trap 'rm -rf -- "$out"' EXIT
+archive=$("$root/tools/build-release" "$out")
+(cd "$out" && sha256sum -c "$(basename "$archive").sha256" >/dev/null)
+if tar -tzf "$archive" | grep -Ev "^${package}(/|$)"; then fail 'archive contains a path outside its package root'; fi
+if tar -tzf "$archive" | grep -Eq '(^|/)(\.git|dist)(/|$)'; then fail 'archive contains repository or build state'; fi
+echo "publication-check: PASS ($package)"

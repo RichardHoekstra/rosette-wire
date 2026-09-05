@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# deliver --- build / verify the production substrate (Deliverables).
+#
+# A Deliverable is a Witness lowered to a floor and BUILT: the production dual
+# of a Witness. Its committed source of truth is a `.ship` spec; the binary is
+# a regenerable build product (gitignored under build/); a `.lock` records the
+# content id of the exact shipped source + the parity verdict, so a rebuild
+# PROVES reproducibility (same slice => same content id) and re-checks parity.
+#
+# USAGE
+#   tools/deliver build  [<name|path.ship>]   # build all (or one); write .lock(s)
+#   tools/deliver verify [<name|path.ship>]   # rebuild; reproducibility+parity gate (CI)
+#   tools/deliver status                       # regenerate STATUS.md
+#
+# ENV: SBCL (default sbcl), ROSETTE_DELIVERABLES (default <repo>/deliverables).
+
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SBCL="${SBCL:-sbcl}"
+export XDG_CACHE_HOME="${ROSETTE_XDG_CACHE_HOME:-/tmp/rosette-asdf-cache}"; mkdir -p "$XDG_CACHE_HOME"
+DELIV="${ROSETTE_DELIVERABLES:-$ROOT/deliverables}"
+
+MODE="${1:-status}"; TARGET="${2:-}"
+
+# Resolve a bare name to its .ship path.
+resolve() {
+  [[ -z "$1" ]] && return 0
+  [[ -f "$1" ]] && { printf '%s' "$1"; return 0; }
+  local p="$DELIV/$1/$1.ship"; [[ -f "$p" ]] && { printf '%s' "$p"; return 0; }
+  echo "deliver: no such deliverable: $1" >&2; exit 2
+}
+
+lisp() {  # run one Lisp form against a registry-loaded ship
+  "$SBCL" --noinform --non-interactive --no-sysinit --no-userinit \
+    --eval '(require :asdf)' \
+    --eval "(asdf:initialize-source-registry \`(:source-registry (:tree ,(truename \"$ROOT/\")) :inherit-configuration))" \
+    --eval '(asdf:load-system :ship)' \
+    --eval "$1" 2>&1
+}
+
+case "$MODE" in
+  build)
+    tgt="$(resolve "$TARGET")"
+    if [[ -n "$tgt" ]]; then
+      lisp "(let ((r (rosette-ship:deliver-file \"$tgt\" :mode :build :sbcl \"$SBCL\")))
+               (format t \"~&BUILT ~A parity=~A cid=~A~%\" (getf r :name) (getf r :parity) (getf r :content-id)))" \
+        | grep -Ei '^BUILT|error|FAIL' >&2
+    else
+      lisp "(let ((results (rosette-ship:deliver-all \"$DELIV\" :mode :build :sbcl \"$SBCL\")))
+               (dolist (r results)
+                 (format t \"~&BUILT ~A ~A parity=~A~%\" (getf r :name) (getf r :verdict) (getf r :parity)))
+               (rosette-ship:write-deliverables-status \"$DELIV\")
+               (unless (every (lambda (r)
+                                (member (getf r :verdict) '(:built :stub) :test #'eq))
+                              results)
+                 (uiop:quit 1)))" \
+        | grep -Ei '^BUILT|error|FAIL' >&2
+    fi
+    lisp "(progn (rosette-ship:write-deliverables-status \"$DELIV\") (format t \"~&STATUS regenerated~%\"))" | grep STATUS >&2
+    ;;
+  verify)
+    tgt="$(resolve "$TARGET")"
+    scope="${tgt:-$DELIV}"
+    out="$(if [[ -n "$tgt" ]]; then
+             lisp "(let ((r (rosette-ship:deliver-file \"$tgt\" :mode :verify :sbcl \"$SBCL\")))
+                     (format t \"~&TOOLCHAIN ~A~%\" (rosette-ship:toolchain-fingerprint))
+                     (format t \"~&VERDICT ~A ~A parity=~A~%\" (getf r :name) (getf r :verdict) (getf r :parity)))"
+           else
+             lisp "(progn
+                     (format t \"~&TOOLCHAIN ~A~%\" (rosette-ship:toolchain-fingerprint))
+                     (dolist (r (rosette-ship:deliver-all \"$DELIV\" :mode :verify :sbcl \"$SBCL\"))
+                       (format t \"~&VERDICT ~A ~A parity=~A~%\" (getf r :name) (getf r :verdict) (getf r :parity))))"
+           fi)"
+    # The gauge the whole verdict list was measured in. A reproducibility claim
+    # that does not say which toolchain produced it is quantified over nothing.
+    echo "$out" | grep -E '^TOOLCHAIN' || true
+    echo "$out" | grep -E '^VERDICT' || { echo "deliver: verify produced no verdicts" >&2; echo "$out" >&2; exit 1; }
+    if echo "$out" | grep -qiE 'drifted|parity-fail|:error|no-lock'; then
+      echo "deliver: REPRODUCIBILITY/PARITY GATE FAILED" >&2; exit 1
+    fi
+    echo "deliver: all deliverables reproduced + parity green"
+    ;;
+  status)
+    lisp "(progn (rosette-ship:write-deliverables-status \"$DELIV\") (format t \"~&STATUS regenerated -> $DELIV/STATUS.md~%\"))" | grep STATUS
+    ;;
+  -h|--help|"") sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) echo "deliver: unknown mode $MODE" >&2; exit 2 ;;
+esac

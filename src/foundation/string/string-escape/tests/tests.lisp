@@ -1,0 +1,83 @@
+;;;; tests.lisp --- tests for rosette-string-escape.
+
+(defpackage #:rosette-string-escape/tests
+  (:use #:cl #:rosette-string-escape #:rosette-assert-core)
+  (:export #:run-all-tests))
+
+(in-package #:rosette-string-escape/tests)
+
+(defun frozen-original-dot-escape (thing &key readably)
+  "Frozen pre-rewrite DOT-ESCAPE for the self-optimizer oracle.  Do not
+update this when the production implementation changes."
+  (let ((text (if readably
+                  (prin1-to-string thing)
+                  (princ-to-string thing))))
+    (with-output-to-string (out)
+      (loop for ch across text
+            do (case ch
+                 (#\" (write-string "\\\"" out))
+                 (#\\ (write-string "\\\\" out))
+                 (#\Newline (write-string "\\n" out))
+                 (t (write-char ch out)))))))
+
+(defun random-oracle-string (state)
+  (let* ((alphabet (format nil "abcXYZ0123 ~C~C~%" #\" #\\))
+         (n (random 80 state))
+         (s (make-string n)))
+    (dotimes (i n s)
+      (setf (schar s i)
+            (schar alphabet (random (length alphabet) state))))))
+
+(defun random-oracle-thing (state)
+  (case (random 4 state)
+    (0 (random-oracle-string state))
+    (1 (intern (string-upcase (random-oracle-string state)) :keyword))
+    (2 (list (random-oracle-string state)
+             (random 100000 state)
+             (random-oracle-string state)))
+    (t (cons (random-oracle-string state)
+             (random-oracle-string state)))))
+
+(defun test-dot-escape-oracle (run)
+  (let ((state (sb-ext:seed-random-state 20260612))
+        (trials 1000))
+    (dotimes (trial trials)
+      (let* ((thing (random-oracle-thing state))
+             (readably (zerop (random 2 state)))
+             (ref (frozen-original-dot-escape thing :readably readably))
+             (got (dot-escape thing :readably readably)))
+        (check run (string= ref got)
+               (format nil "dot-escape oracle trial ~D exact string equality"
+                       trial)))))
+  (format t "~&  [self-optimizer] dot-escape oracle: 1000 random inputs exact-equivalent.~%"))
+
+(defun run-all-tests ()
+  (with-test-run (run "rosette-string-escape")
+    (check run (string= (dot-escape "plain label") "plain label")
+           "dot-escape leaves plain labels unchanged")
+    (check run (string= (dot-escape "a\"b") "a\\\"b")
+           "dot-escape escapes quotes")
+    (check run (string= (dot-escape "a\\b") "a\\\\b")
+           "dot-escape escapes backslashes")
+    (check run (string= (dot-escape (format nil "a~%b")) "a\\nb")
+           "dot-escape escapes newlines")
+    (check run (string= (dot-escape (format nil "\"a\\~%b\""))
+                        "\\\"a\\\\\\nb\\\"")
+           "dot-escape composes quote, backslash, and newline escaping")
+    (check run (string= (dot-escape 42) "42")
+           "dot-escape default rendering uses princ")
+    (check run (string= (dot-escape 'alpha) "ALPHA")
+           "dot-escape default symbol rendering is display-oriented")
+    (check run (string= (dot-escape 'alpha :readably t)
+                        "ROSETTE-STRING-ESCAPE/TESTS::ALPHA")
+           "dot-escape readably rendering uses prin1 on symbols")
+    (check run (string= (dot-escape "abc" :readably t)
+                        "\\\"abc\\\"")
+           "dot-escape readably rendering includes escaped string delimiters")
+    (check run (and (search "\\\"a" (dot-escape "a\"b" :readably t))
+                    (search "\\\\\\\"" (dot-escape "a\"b" :readably t)))
+           "dot-escape can render readably first")
+    (check run (not (search (string #\Newline)
+                            (dot-escape (format nil "a~%b"))))
+           "dot-escape output contains escaped newline text, not raw newline")
+    (test-dot-escape-oracle run)))

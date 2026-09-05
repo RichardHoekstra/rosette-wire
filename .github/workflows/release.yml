@@ -1,0 +1,24 @@
+name: release-artifact
+"on":
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y sbcl bubblewrap make
+      - run: make release-check
+      - run: make dist
+      - run: cd dist && sha256sum -c rosette-wire-0.1.0-rc.3.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rosette-wire-source-${{ github.ref_name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error

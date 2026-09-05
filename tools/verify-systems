@@ -1,0 +1,16 @@
+#!/usr/bin/env -S sbcl --script
+
+(require :asdf)
+(require :uiop)
+(defparameter *self* (or *load-truename* *load-pathname*))
+(defparameter *root* (uiop:pathname-parent-directory-pathname (uiop:pathname-directory-pathname *self*)))
+(asdf:initialize-output-translations '(:output-translations (t "/tmp/rosette-asdf-cache/") :ignore-inherited-configuration))
+(asdf:initialize-source-registry `(:source-registry (:tree ,*root*) :ignore-inherited-configuration))
+(defparameter *public* (loop for line in (nthcdr 2 (uiop:read-file-lines (merge-pathnames "release/public-systems.tsv" *root*))) unless (zerop (length line)) collect (first (uiop:split-string line :separator '(#\Tab)))))
+(defparameter *allowed* (remove "" (uiop:read-file-lines (merge-pathnames "release/allowed-systems.txt" *root*)) :test #'string=))
+(defun dep-name (dep) (string-downcase (princ-to-string (if (consp dep) (second dep) dep))))
+(defun visit (name seen) (unless (gethash name seen) (setf (gethash name seen) t) (dolist (dep (mapcar #'dep-name (asdf:system-depends-on (asdf:find-system name)))) (visit dep seen))))
+(dolist (name *public*) (unless (asdf:find-system name nil) (error "Missing public system ~A" name)))
+(let ((seen (make-hash-table :test #'equal))) (dolist (name *public*) (visit name seen)) (let ((actual (sort (loop for name being the hash-keys of seen collect name) #'string<)) (expected (sort (copy-list *public*) #'string<))) (unless (equal actual expected) (error "Runtime closure drift: ~S" (set-exclusive-or actual expected :test #'string=)))))
+(dolist (name *public*) (format t "~&TEST ~A~%" name) (asdf:test-system name))
+(format t "~&systems: PASS (~D public systems; ~D allowed including tests/support)~%" (length *public*) (length *allowed*))

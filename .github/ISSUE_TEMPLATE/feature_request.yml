@@ -1,0 +1,17 @@
+name: Feature proposal
+description: Propose one bounded capability or improvement
+title: "feature: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and intended user
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed public contract and verifier
+      description: Name the invariant, negative control, and compatibility effect.
+    validations:
+      required: true

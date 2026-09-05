@@ -1,0 +1,83 @@
+;;;; analysis-shape-binding-predicates.lisp --- binding and literal helpers.
+
+(in-package #:rosette-sexpr-dag)
+
+(defun %keyword-default-binding-list-p (sexp)
+  (and (listp sexp)
+       (not (null sexp))
+       (every (lambda (item)
+                (and (consp item)
+                     (consp (cdr item))
+                     (null (cddr item))
+                     (symbolp (first item))
+                     (search "weight"
+                             (string-downcase (symbol-name (first item))))
+                     (or (numberp (second item))
+                         (keywordp (second item)))))
+              sexp)))
+
+(defun %macro-binding-spec-p (sexp)
+  (or (%symbol-name-list= sexp '("nx" "ny" "dx" "dy"))
+      (%symbol-name-list= sexp '("nx" "ny" "nz" "dx" "dy" "dz"))
+      (%symbol-name-list= sexp '("i" "j" "k" "mesh"))
+      (%symbol-name-list= sexp '("ax" "ay" "az" "mesh"))
+      (%symbol-name-list= sexp '("bx" "by" "bz" "mesh"))
+      (%symbol-name-list= sexp '("ex" "ey" "ez" "mesh"))
+      (%symbol-name-list= sexp '("vx" "vy" "vz" "mesh"))
+      (%symbol-name-list= sexp '("idx" "array"))
+      (%finite-state-accessor-args-p sexp)
+      (and (consp sexp)
+           (%every-proper-list-p
+            (lambda (item)
+              (%symbol-name-in-p item '("nx" "ny" "nz" "dx" "dy" "dz")))
+            sexp))))
+
+(defun %literal-atom-p (sexp)
+  (or (keywordp sexp)
+      (numberp sexp)
+      (stringp sexp)
+      (characterp sexp)))
+
+(defun %char-code-literal-p (sexp)
+  (and (%sexp-head-name-in-p sexp '("char-code"))
+       (consp (rest sexp))
+       (characterp (second sexp))
+       (null (cddr sexp))))
+
+(defun %literal-data-tree-p (sexp)
+  (or (%literal-atom-p sexp)
+      (%quoted-form-p sexp)
+      (%char-code-literal-p sexp)
+      (and (consp sexp)
+           (%every-proper-list-p #'%literal-data-tree-p sexp))))
+
+(defun %literal-data-list-p (sexp)
+  (and (consp sexp)
+       (%every-proper-list-p #'%literal-data-tree-p sexp)))
+
+(defun %literal-loader-arg-p (sexp)
+  (or (%literal-data-tree-p sexp)
+      (%char-code-literal-p sexp)))
+
+(defun %sexp-contains-keyword-p (sexp keyword)
+  (cond ((eq sexp keyword) t)
+        ((consp sexp)
+         (or (%sexp-contains-keyword-p (car sexp) keyword)
+             (%sexp-contains-keyword-p (cdr sexp) keyword)))
+        (t nil)))
+
+(defun %literal-data-loader-p (sexp)
+  (or (%char-code-literal-p sexp)
+      (and (%sexp-head-name-in-p sexp '("%glyph"))
+           (%every-proper-list-p #'%literal-loader-arg-p (rest sexp)))
+      (and (consp sexp)
+           (%sexp-contains-keyword-p sexp :initial-contents))))
+
+(defun %string-prefix-p (prefix string)
+  (and (<= (length prefix) (length string))
+       (string= prefix string :end2 (length prefix))))
+
+(defun %string-suffix-p (suffix string)
+  (let ((start (- (length string) (length suffix))))
+    (and (not (minusp start))
+         (string= suffix string :start2 start))))

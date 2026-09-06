@@ -68,7 +68,7 @@
   :pathname
   "src/"
   :components
-  ((:file "eshkol"))
+  ((:file "eshkol") (:file "eshkol-numeric" :depends-on ("eshkol")))
   :in-order-to
   ((test-op (test-op #:front-door/eshkol/tests))))
 

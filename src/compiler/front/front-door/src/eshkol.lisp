@@ -34,7 +34,41 @@
    #:eshkol-backend-error-status
    #:eshkol-backend-error-envelope
    #:eshkol-backend-error-detail
-   #:eshkol-unavailable))
+   #:eshkol-unavailable
+   ;; Rational/float/AD numeric dialect (eshkol-numeric.lisp), a sibling of the
+   ;; exact-integer dialect above.
+   #:numeric-dialect-refusal
+   #:numeric-dialect-refusal-stage
+   #:numeric-dialect-refusal-input
+   #:numeric-dialect-refusal-reason
+   #:numeric-literal-type
+   #:infer-numeric-type
+   #:numeric-program
+   #:numeric-program-p
+   #:numeric-program-funs
+   #:numeric-program-main
+   #:eval-numeric-term
+   #:numeric-program-eval
+   #:kernel-eval-numeric-term
+   #:numeric-kernel-run
+   #:numeric-gate
+   #:double-ulp
+   #:+default-ulp-bound+
+   #:within-ulp-p
+   #:emit-eshkol-numeric-source
+   #:gate-eshkol-numeric
+   #:eshkol-numeric-gate-report
+   #:eshkol-numeric-gate-report-p
+   #:eshkol-numeric-gate-report-program-id
+   #:eshkol-numeric-gate-report-toolchain-command
+   #:eshkol-numeric-gate-report-direct-value
+   #:eshkol-numeric-gate-report-kernel-value
+   #:eshkol-numeric-gate-report-jit-value
+   #:eshkol-numeric-gate-report-aot-value
+   #:eshkol-numeric-gate-report-jit-envelope
+   #:eshkol-numeric-gate-report-aot-compile-envelope
+   #:eshkol-numeric-gate-report-aot-envelope
+   #:eshkol-numeric-gate-report-passed))
 
 (in-package #:rosette-front-door/eshkol)
 

@@ -20,6 +20,20 @@
               (format t "~&  FAIL  ~A~%    expression: ~S~%"
                       ',name ',expression))))
 
+(defun check-anon (label passed)
+  (if passed
+      (progn (incf *passes*) (format t "~&  PASS  ~A~%" label))
+      (progn (incf *fails*) (format t "~&  FAIL  ~A~%" label))))
+
+(defun prlimit-available-p ()
+  "T iff the Linux `prlimit` utility ROSETTE-ISOLATED-WORKER wraps every
+launch in is on PATH. Absent on macOS/BSD hosts; the numeric real-Eshkol rung
+below falls back to a direct invocation there rather than skip entirely."
+  (ignore-errors
+   (let ((process (sb-ext:run-program "prlimit" '("--version") :search t
+                                       :output nil :error nil :wait t)))
+     (and process (integerp (sb-ext:process-exit-code process))))))
+
 (defun signals-backend-error-p (thunk)
   (handler-case (progn (funcall thunk) nil)
     (esh:eshkol-backend-error () t)))
@@ -335,6 +349,159 @@ processes or the outer Docker client can be refused before launch."
             (check executed-emitter-mutant-is-caught
                    (not (esh:eshkol-gate-report-passed mutant)))))
         (format t "~&  SKIP  real Eshkol JIT/AOT ~
+(ROSETTE_ESHKOL_BIN and ROSETTE_ESHKOL_CONTAINER unset)~%")))
+
+  ;; ---------------------------------------------------------------------
+  ;; Numeric dialect: exact rationals, IEEE doubles under the stated ulp
+  ;; regime, and forward-mode AD (derivative/gradient). NUMERIC-GATE runs the
+  ;; direct evaluator against the independently written kernel-VM oracle with
+  ;; no external process, so these checks (and the three negative cases) run
+  ;; on every host; the opt-in real-Eshkol rung below adds the JIT/AOT leg.
+  ;; ---------------------------------------------------------------------
+
+  ;; A rational program whose float lowering would round: (1/3)+(1/3) stays
+  ;; the exact ratio 2/3 in both the direct evaluator and the kernel oracle,
+  ;; where a double-precision computation of the same sum could only ever
+  ;; produce a nearby approximation.
+  (multiple-value-bind (passed direct kernel)
+      (esh:numeric-gate '((main-numeric (+ (/ 1 3) (/ 1 3)))))
+    (check rational-sum-stays-exact
+           (and passed (= 2/3 direct) (= 2/3 kernel) (rationalp direct))))
+
+  ;; A double program at the stated ulp bound: 0.1+0.2 rounds to the
+  ;; well-known 0.30000000000000004, which must be indistinguishable from
+  ;; itself under +DEFAULT-ULP-BOUND+ (0 ulps of actual difference here) and
+  ;; distinguishable from the untruncated mathematical value at a tight bound.
+  (multiple-value-bind (passed direct kernel)
+      (esh:numeric-gate '((main-numeric (+ 0.1d0 0.2d0))))
+    (check float-sum-at-ulp-bound
+           (and passed (= direct 0.30000000000000004d0) (= kernel direct)
+                (esh:within-ulp-p kernel direct)))
+    ;; The regime is tight: a handful of ulps away is a REAL disagreement,
+    ;; not noise, and must be rejected.
+    (check ulp-bound-rejects-a-few-ulps-of-drift
+           (not (esh:within-ulp-p (+ direct (* 5 (esh:double-ulp direct))) direct)))
+    (check ulp-bound-accepts-the-stated-two-ulp-slack
+           (esh:within-ulp-p (+ direct (esh:double-ulp direct)) direct)))
+
+  ;; A derivative program checked against both the dual-number evaluator (via
+  ;; NUMERIC-GATE, which is itself direct-vs-kernel dual agreement) and an
+  ;; independent central-difference approximation computed in plain CL.
+  (flet ((central-difference (fn x &optional (h 1d-6))
+           (/ (- (funcall fn (+ x h)) (funcall fn (- x h))) (* 2 h))))
+    (multiple-value-bind (passed direct kernel)
+        (esh:numeric-gate '((defun-numeric cube (x) (* (* x x) x))
+                             (main-numeric (derivative cube 2.0d0))))
+      (check derivative-dual-evaluator-agrees (and passed (= direct 12.0d0) (= kernel direct)))
+      ;; Central difference is an O(h^2) APPROXIMATION, not another exact
+      ;; readout, so it is compared against a plain absolute tolerance rather
+      ;; than the ulp regime above (which states exactness for the direct/
+      ;; kernel/JIT/AOT foursome, not for a numerical-differentiation oracle).
+      (check derivative-agrees-with-central-difference
+             (< (abs (- direct (central-difference (lambda (x) (* x x x)) 2.0d0))) 1d-4))))
+
+  ;; Forward-mode GRADIENT: d/dy (x^2+y^3) at (2,3) is 3*y^2=27.
+  (multiple-value-bind (passed direct kernel)
+      (esh:numeric-gate '((defun-numeric xy (x y) (+ (* x x) (* (* y y) y)))
+                           (main-numeric (gradient xy (2.0d0 3.0d0) 1))))
+    (check gradient-component-agrees (and passed (= direct 27.0d0) (= kernel direct))))
+
+  ;; Three negative cases, one per addition: the verifier must refuse each
+  ;; before ever considering an external toolchain.
+  (check rational-negative-case-literal-zero-denominator-refused
+         (handler-case
+             (progn (esh:emit-eshkol-numeric-source '((main-numeric (/ 1 0)))) nil)
+           (esh:numeric-dialect-refusal () t)))
+
+  (check float-negative-case-mixed-exact-inexact-refused
+         (handler-case
+             (progn (esh:emit-eshkol-numeric-source '((main-numeric (+ 1/3 0.5d0)))) nil)
+           (esh:numeric-dialect-refusal () t)))
+
+  (check ad-negative-case-gradient-index-out-of-range-refused
+         (handler-case
+             (progn (esh:emit-eshkol-numeric-source
+                     '((defun-numeric xy (x y) (+ x y))
+                       (main-numeric (gradient xy (1.0d0 2.0d0) 5))))
+                    nil)
+           (esh:numeric-dialect-refusal () t)))
+
+  ;; Emission sanity: the numeric dialect reuses eshkol.lisp's identifier
+  ;; mangling and receipt-marker shape, and lowers derivative/gradient to
+  ;; Eshkol's own builtins.
+  (multiple-value-bind (source id)
+      (esh:emit-eshkol-numeric-source
+       '((defun-numeric f (x) (* x x)) (main-numeric (derivative f 3.0d0))))
+    (declare (ignore id))
+    (check numeric-emission-uses-eshkol-derivative-builtin
+           (search "(derivative rshf_" source))
+    (check numeric-emission-marker-is-distinct-from-integer-dialect
+           (search "ROSETTE-FRONT-DOOR-ESHKOL-NUMERIC-RESULT" source)))
+
+  (multiple-value-bind (source id)
+      (esh:emit-eshkol-numeric-source '((main-numeric (/ 1 3))))
+    (declare (ignore id))
+    (check rational-emission-uses-slash-syntax (search "(/ 1 3)" source)))
+
+  ;; Real Eshkol JIT/AOT for the numeric dialect is opt-in exactly like the
+  ;; integer dialect above. ROSETTE_ESHKOL_BIN's rosette-isolated-worker path
+  ;; requires the Linux `prlimit` utility (see %WRAPPED-ARGV), so on a host
+  ;; without it this rung instead runs Eshkol directly (still opt-in, still
+  ;; the real compiler, only without the process-ceiling wrapper) and reports
+  ;; which path ran; it never fabricates a four-way JIT/AOT agreement.
+  (multiple-value-bind (command aot-prefix description) (external-configuration)
+    (if command
+        (let ((numeric-cases
+                (list
+                 (list :name "rational-exactness"
+                       :surface '((main-numeric (+ (/ 1 3) (/ 1 3))))
+                       :expected 2/3)
+                 (list :name "float-ulp-bound"
+                       :surface '((main-numeric (+ 0.1d0 0.2d0)))
+                       :expected 0.30000000000000004d0)
+                 (list :name "derivative"
+                       :surface '((defun-numeric cube (x) (* (* x x) x))
+                                  (main-numeric (derivative cube 2.0d0)))
+                       :expected 12.0d0)
+                 (list :name "gradient"
+                       :surface '((defun-numeric xy (x y) (+ (* x x) (* (* y y) y)))
+                                  (main-numeric (gradient xy (2.0d0 3.0d0) 1)))
+                       :expected 27.0d0))))
+          (if (prlimit-available-p)
+              (dolist (case numeric-cases)
+                (let ((report (esh:gate-eshkol-numeric
+                               (getf case :surface) :eshkol-command command
+                                                     :aot-run-prefix aot-prefix)))
+                  (format t "~&  INFO  real Eshkol (worker) ~A via ~A~%" (getf case :name) description)
+                  (check-anon (format nil "real-eshkol-numeric-worker-~A" (getf case :name))
+                             (esh:eshkol-numeric-gate-report-passed report))))
+              (progn
+                (format t "~&  INFO  real Eshkol (direct invocation, no prlimit on this host) via ~A~%"
+                        description)
+                (dolist (case numeric-cases)
+                  (multiple-value-bind (source) (esh:emit-eshkol-numeric-source (getf case :surface))
+                    (let* ((argv (esh::%command command))
+                           (path (uiop:with-temporary-file
+                                     (:pathname p :stream s :type "esk" :keep t)
+                                   (write-string source s) p))
+                           (output (with-output-to-string (out)
+                                     (sb-ext:run-program
+                                      (first argv)
+                                      (append (rest argv)
+                                              (list "--no-stdlib" "--strict-types" "--optimize" "0"
+                                                    "--run" (uiop:native-namestring path)))
+                                      :output out :error nil :search t)))
+                           (value-line (car (last (remove "" (uiop:split-string output :separator '(#\Newline))
+                                                           :test #'string=)))))
+                      (ignore-errors (delete-file path))
+                      (format t "~&  INFO    ~A => ~A~%" (getf case :name) (string-trim '(#\Space) (or value-line "")))
+                      (check-anon (format nil "real-eshkol-numeric-direct-~A" (getf case :name))
+                       (let ((*read-default-float-format* 'double-float))
+                         (handler-case
+                             (= (read-from-string (string-trim '(#\Space) value-line))
+                                (getf case :expected))
+                           (error () nil))))))))))
+        (format t "~&  SKIP  real Eshkol numeric-dialect JIT/AOT ~
 (ROSETTE_ESHKOL_BIN and ROSETTE_ESHKOL_CONTAINER unset)~%")))
 
   (format t "~&==== rosette-front-door/eshkol: ~D passes, ~D failures ====~%"

@@ -20,8 +20,34 @@ that emulate process replies test adapter behavior, not real compiler parity.
 
 The accepted dialect includes exact integer arithmetic, conditionals, lexical
 binding, and admitted recursion. Every value and intermediate must fit the
-tagged-i32 kernel regime `-2^28 <= value < 2^28`. General higher-order programs,
-rational/float AD, and arbitrary ProgramIR dialects are outside this gate.
+tagged-i32 kernel regime `-2^28 <= value < 2^28`. General higher-order programs
+and arbitrary ProgramIR dialects are outside this gate.
+
+A second, independently admitted dialect (`emit-eshkol-numeric-source`,
+`gate-eshkol-numeric`) covers exact rationals, IEEE doubles, and forward-mode
+AD through Eshkol's own `derivative`/`gradient` builtins. It sits beside the
+integer dialect rather than inside it: `:int` values freely promote to either
+`:rational` or `:float`, but `:rational` and `:float` never implicitly mix --
+a program that tries to launder precision loss through arithmetic (adding an
+exact ratio to an inexact double without an explicit conversion) is refused
+at admission, not silently coerced. `derivative`/`gradient` targets must be
+single- or multi-argument functions over `:float` parameters returning
+`:float`; a `gradient` component index outside the target's arity is refused
+for the same reason.
+
+`:int`/`:rational` readouts across the direct evaluator, the independently
+written kernel-VM oracle, the JIT, and the AOT executable are compared
+bit-for-bit. `:float` readouts are compared under an explicit ulp regime:
+two IEEE doubles agree when they differ by at most `+DEFAULT-ULP-BOUND+` (2)
+units in the last place of the reference value, computed from the reference's
+own binade via `DOUBLE-ULP` rather than a fixed decimal epsilon -- the
+natural unit for comparing two computations that should be the same IEEE-754
+double, not merely close. This is stricter than a magnitude-relative
+tolerance and looser than exact equality, which is what a differently
+ordered but IEEE-correctly-rounded evaluation of the same expression needs.
+A central-difference numerical approximation of a derivative is a different
+kind of readout (an O(h^2) approximation, not another exact evaluation of the
+same expression) and is compared against a plain absolute tolerance instead.
 
 The external gate returns an execution observation, not a self-contained
 toolchain-attested certificate. Include compiler revision, commands, stdout,

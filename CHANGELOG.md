@@ -9,6 +9,11 @@ All notable changes follow semantic versioning.
   ulp regime, and forward-mode AD through Eshkol's `derivative`/`gradient`
   builtins. `:int` promotes freely into `:rational` or `:float`; the two
   never implicitly mix. See docs/interop.md.
+- `:float` readouts from Eshkol cross the process boundary as an exact
+  `(:dyadic m e)` encoding instead of a decimal display, so the ulp regime
+  compares the double Eshkol computed rather than its rounded print.
+- `tools/test-system` lists the test suites it ran and names any suites of the
+  same primary system it did not run.
 
 ## [0.1.0-rc.3] - 2026-09-01
 

@@ -25,6 +25,14 @@
       (progn (incf *passes*) (format t "~&  PASS  ~A~%" label))
       (progn (incf *fails*) (format t "~&  FAIL  ~A~%" label))))
 
+(defmacro backend-failure-is-a-fail ((label) &body body)
+  "Run BODY; an ESHKOL-BACKEND-ERROR from a real toolchain run is reported and
+counted as one FAIL named LABEL instead of aborting the remaining checks."
+  `(handler-case (progn ,@body)
+     (esh:eshkol-backend-error (condition)
+       (format t "~&  INFO  ~A: ~A~%" ,label condition)
+       (check-anon ,label nil))))
+
 (defun prlimit-available-p ()
   "T iff the Linux `prlimit` utility ROSETTE-ISOLATED-WORKER wraps every
 launch in is on PATH. Absent on macOS/BSD hosts; the numeric real-Eshkol rung
@@ -321,6 +329,7 @@ processes or the outer Docker client can be refused before launch."
   (multiple-value-bind (command aot-prefix description)
       (external-configuration)
     (if command
+        (backend-failure-is-a-fail ("real-eshkol-integer-gate")
         (let* ((container-p (uiop:getenv "ROSETTE_ESHKOL_CONTAINER"))
                (policy (and container-p (container-client-policy)))
                (ir (front:surface->program-ir *integration-surface*))
@@ -347,7 +356,7 @@ processes or the outer Docker client can be refused before launch."
                                    :timeout-ms 120000))
                       :operator-mutant :add-to-sub)))
             (check executed-emitter-mutant-is-caught
-                   (not (esh:eshkol-gate-report-passed mutant)))))
+                   (not (esh:eshkol-gate-report-passed mutant))))))
         (format t "~&  SKIP  real Eshkol JIT/AOT ~
 (ROSETTE_ESHKOL_BIN and ROSETTE_ESHKOL_CONTAINER unset)~%")))
 
@@ -441,7 +450,45 @@ processes or the outer Docker client can be refused before launch."
   (multiple-value-bind (source id)
       (esh:emit-eshkol-numeric-source '((main-numeric (/ 1 3))))
     (declare (ignore id))
-    (check rational-emission-uses-slash-syntax (search "(/ 1 3)" source)))
+    (check rational-emission-uses-slash-syntax (search "(/ 1 3)" source))
+    (check rational-emission-displays-value-directly
+           (not (search "rosette_display_double" source))))
+
+  ;; A :FLOAT readout crosses the process boundary as the exact double, never
+  ;; as a decimal display: Eshkol prints (+ 0.1 0.2) as 0.3, one ulp from the
+  ;; computed value, which the ulp regime alone would accept.
+  (multiple-value-bind (source id)
+      (esh:emit-eshkol-numeric-source '((main-numeric (+ 0.1d0 0.2d0))))
+    (declare (ignore id))
+    (check float-emission-uses-exact-dyadic-readout
+           (search "(rosette_display_double rosette_numeric_result)" source)))
+  (check dyadic-readout-decodes-to-the-exact-double
+         (eql 0.30000000000000004d0
+              (esh::%decode-numeric-readout '(:dyadic 5404319552844596 -54) :float)))
+  (check dyadic-readout-decodes-negative-and-subnormal
+         (and (eql -2.5d0 (esh::%decode-numeric-readout
+                           '(:negative (:dyadic 5629499534213120 -51)) :float))
+              (eql least-positive-double-float
+                   (esh::%decode-numeric-readout '(:dyadic 4503599627370496 -1126) :float))))
+  (check float-readout-refuses-decimal-literals
+         (and (null (esh::%decode-numeric-readout 0.3 :float))
+              (null (esh::%decode-numeric-readout 0.30000000000000004d0 :float))))
+  (check float-readout-refuses-unrepresentable-and-unnormalized
+         (and (null (esh::%decode-numeric-readout :unrepresentable :float))
+              (null (esh::%decode-numeric-readout '(:dyadic 5 0) :float))))
+  (check numeric-receipt-refuses-a-type-other-than-the-admitted-one
+         (and (esh::%numeric-accept-result
+               '(:schema :rosette-front-door-eshkol-numeric-result/v1 :ok t
+                 :program-id "p" :value-type :rational :value 2/3)
+               "p" :rational)
+              (null (esh::%numeric-accept-result
+                     '(:schema :rosette-front-door-eshkol-numeric-result/v1 :ok t
+                       :program-id "p" :value-type :float :value 12)
+                     "p" :float))
+              (null (esh::%numeric-accept-result
+                     '(:schema :rosette-front-door-eshkol-numeric-result/v1 :ok t
+                       :program-id "p" :value-type :rational :value 2/3)
+                     "p" :float))))
 
   ;; Real Eshkol JIT/AOT for the numeric dialect is opt-in exactly like the
   ;; integer dialect above. ROSETTE_ESHKOL_BIN's rosette-isolated-worker path
@@ -459,6 +506,9 @@ processes or the outer Docker client can be refused before launch."
                  (list :name "float-ulp-bound"
                        :surface '((main-numeric (+ 0.1d0 0.2d0)))
                        :expected 0.30000000000000004d0)
+                 (list :name "float-third"
+                       :surface '((main-numeric (/ 1.0d0 3.0d0)))
+                       :expected (/ 1d0 3d0))
                  (list :name "derivative"
                        :surface '((defun-numeric cube (x) (* (* x x) x))
                                   (main-numeric (derivative cube 2.0d0)))
@@ -468,13 +518,19 @@ processes or the outer Docker client can be refused before launch."
                                   (main-numeric (gradient xy (2.0d0 3.0d0) 1)))
                        :expected 27.0d0))))
           (if (prlimit-available-p)
-              (dolist (case numeric-cases)
-                (let ((report (esh:gate-eshkol-numeric
-                               (getf case :surface) :eshkol-command command
-                                                     :aot-run-prefix aot-prefix)))
-                  (format t "~&  INFO  real Eshkol (worker) ~A via ~A~%" (getf case :name) description)
-                  (check-anon (format nil "real-eshkol-numeric-worker-~A" (getf case :name))
-                             (esh:eshkol-numeric-gate-report-passed report))))
+              (let ((policy (if (uiop:getenv "ROSETTE_ESHKOL_CONTAINER")
+                                (container-client-policy)
+                                (worker:make-isolation-policy :timeout-ms 120000))))
+                (dolist (case numeric-cases)
+                  (let ((label (format nil "real-eshkol-numeric-worker-~A" (getf case :name))))
+                    (format t "~&  INFO  real Eshkol (worker) ~A via ~A~%" (getf case :name) description)
+                    (backend-failure-is-a-fail (label)
+                      (check-anon label
+                                  (esh:eshkol-numeric-gate-report-passed
+                                   (esh:gate-eshkol-numeric
+                                    (getf case :surface) :eshkol-command command
+                                                          :aot-run-prefix aot-prefix
+                                                          :policy policy)))))))
               (progn
                 (format t "~&  INFO  real Eshkol (direct invocation, no prlimit on this host) via ~A~%"
                         description)

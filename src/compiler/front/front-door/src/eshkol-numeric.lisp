@@ -533,25 +533,74 @@ a single-float. ~F does not truncate a double's significant digits."
     (%emit-numeric-term (numeric-program-main program) stream)
     (write-line ")" stream)))
 
+(defun %numeric-main-type (program)
+  "The admitted dialect type of PROGRAM's MAIN-NUMERIC term."
+  (infer-numeric-type (numeric-program-main program) '() (numeric-program-funs program)))
+
+;;; A :FLOAT readout must reach the gate as the exact double Eshkol computed,
+;;; not as its decimal DISPLAY: Eshkol prints (+ 0.1 0.2) as 0.3, which the
+;;; ulp regime would then accept one ulp away. Nor can it go through Eshkol's
+;;; INEXACT->EXACT, which converts over a fixed 2^52 denominator (0.1 comes
+;;; back as 450359962737049/2^52). The helper below instead scales |x| by
+;;; powers of two -- exact in IEEE arithmetic, subnormals included -- into an
+;;; integer mantissa m in [2^52, 2^53) and prints (:dyadic m e), x = m*2^e.
+;;; INEXACT->EXACT is then applied only to that integer-valued double.
+;;; Non-finite values print :UNREPRESENTABLE and are refused at acceptance.
+
+(defparameter +numeric-dyadic-helper+
+  "(define (rosette_dyadic_down a e) (if (>= a 9007199254740992.0) (rosette_dyadic_down (/ a 2.0) (+ e 1)) (begin (display \"(:dyadic \") (display (inexact->exact a)) (display \" \") (display e) (display \")\"))))
+(define (rosette_dyadic_up a e) (if (< a 4503599627370496.0) (rosette_dyadic_up (* a 2.0) (- e 1)) (rosette_dyadic_down a e)))
+(define (rosette_display_double x) (if (= x x) (if (= x 0.0) (display \"(:dyadic 0 0)\") (if (= x (* x 2.0)) (display \":unrepresentable\") (if (< x 0.0) (begin (display \"(:negative \") (rosette_dyadic_up (- 0.0 x) 0) (display \")\")) (rosette_dyadic_up x 0)))) (display \":unrepresentable\")))
+")
+
 (defun emit-eshkol-numeric-source (surface)
   "Admit SURFACE through the numeric dialect and emit deterministic Eshkol
 source. Returns (values SOURCE PROGRAM-ID PROGRAM), matching the shape of
 eshkol.lisp's EMIT-ESHKOL-SOURCE."
   (let* ((program (%parse-numeric-surface surface))
-         (body (%emit-numeric-module-body program))
+         (main-type (%numeric-main-type program))
+         (body (concatenate 'string
+                            (if (eq main-type :float) +numeric-dyadic-helper+ "")
+                            (%emit-numeric-module-body program)))
          (program-id (cid:content-id-long (list :rosette-front-door-eshkol-numeric-source/v1 body))))
     (values
      (with-output-to-string (stream)
        (write-string body stream)
        (format stream "(display ~S)~%" +numeric-receipt-marker+)
        (format stream "(display ~S)~%"
-               (format nil "(:schema ~S :ok t :program-id ~S :value "
-                       +numeric-receipt-schema+ program-id))
-       (write-line "(display rosette_numeric_result)" stream)
+               (format nil "(:schema ~S :ok t :program-id ~S :value-type ~S :value "
+                       +numeric-receipt-schema+ program-id main-type))
+       (write-line (if (eq main-type :float)
+                       "(rosette_display_double rosette_numeric_result)"
+                       "(display rosette_numeric_result)")
+                   stream)
        (write-line "(display \")\")" stream)
        (write-line "(newline)" stream))
      program-id
      program)))
+
+(defun %decode-numeric-readout (value type)
+  "Decode an accepted receipt VALUE of admitted TYPE into a CL number, or NIL
+when it is not a well-formed readout of that type. A :FLOAT readout must be
+the exact (:DYADIC m e) encoding with m in [2^52, 2^53) (or 0 0), optionally
+wrapped in (:NEGATIVE ...); a decimal float literal is refused."
+  (flet ((dyadic (form)
+           (and (consp form) (eq (first form) :dyadic)
+                (%num-proper-list-p form) (= (length form) 3)
+                (integerp (second form)) (integerp (third form))
+                (let ((m (second form)) (e (third form)))
+                  (when (or (and (zerop m) (zerop e))
+                            (and (<= (expt 2 52) m) (< m (expt 2 53))
+                                 (<= -1126 e 971)))
+                    (coerce (* m (expt 2 e)) 'double-float))))))
+    (ecase type
+      (:int (and (integerp value) value))
+      (:rational (and (rationalp value) value))
+      (:float (if (and (consp value) (eq (first value) :negative)
+                       (%num-proper-list-p value) (= (length value) 2))
+                  (let ((magnitude (dyadic (second value))))
+                    (and magnitude (- magnitude)))
+                  (dyadic value))))))
 
 ;;; -------------------------------------------------------------------------
 ;;; JIT/AOT gate: the same worker/receipt machinery GATE-ESHKOL uses, so the
@@ -570,15 +619,21 @@ eshkol.lisp's EMIT-ESHKOL-SOURCE."
   jit-envelope aot-compile-envelope aot-envelope
   (passed nil :type boolean))
 
-(defun %numeric-accept-result (form program-id)
-  (and (%exact-plist-keys-p form '(:schema :ok :program-id :value))
+(defun %numeric-accept-result (form program-id value-type)
+  "Accept FORM only if it is this program's receipt and its :VALUE decodes as
+a readout of the admitted VALUE-TYPE. Returns FORM with :VALUE replaced by the
+decoded CL number."
+  (and (%exact-plist-keys-p form '(:schema :ok :program-id :value-type :value))
        (eq +numeric-receipt-schema+ (getf form :schema))
        (eq t (getf form :ok))
        (stringp (getf form :program-id))
        (string= program-id (getf form :program-id))
-       (numberp (getf form :value))
-       (numeric-literal-type (getf form :value))
-       form))
+       (eq value-type (getf form :value-type))
+       (let ((decoded (%decode-numeric-readout (getf form :value) value-type)))
+         (and decoded
+              (list :schema (getf form :schema) :ok t
+                    :program-id (getf form :program-id)
+                    :value-type value-type :value decoded)))))
 
 (defun %numeric-values-agree-p (direct kernel jit aot)
   "Rational/int readouts must be bit-for-bit EQL; a :FLOAT readout is compared
@@ -586,7 +641,7 @@ under +DEFAULT-ULP-BOUND+ against the direct evaluator (the reference)."
   (flet ((agree (a b) (if (typep direct 'double-float) (within-ulp-p a b) (eql a b))))
     (and (agree kernel direct) (agree jit direct) (agree aot direct))))
 
-(defun %run-numeric-jit (source-path program-id command policy)
+(defun %run-numeric-jit (source-path program-id value-type command policy)
   (worker:run-isolated-command
    (append (list "env" "ESHKOL_JIT_CACHE=0" "ESHKOL_JIT_COMPILE_THREADS=1"
                  (format nil "ESHKOL_TIMEOUT_MS=~D" (%timeout-ms policy)))
@@ -594,20 +649,20 @@ under +DEFAULT-ULP-BOUND+ against the direct evaluator (the reference)."
            (list "--no-stdlib" "--strict-types" "--optimize" "0"
                  "--run" (uiop:native-namestring source-path)))
    :policy policy :marker +numeric-receipt-marker+
-   :accept (lambda (form) (%numeric-accept-result form program-id))
+   :accept (lambda (form) (%numeric-accept-result form program-id value-type))
    :metadata (list :backend :eshkol-numeric :mode :jit :program-id program-id)))
 
-(defun %run-numeric-aot (output-path program-id policy aot-run-prefix)
+(defun %run-numeric-aot (output-path program-id value-type policy aot-run-prefix)
   (worker:run-isolated-command
    (append aot-run-prefix (list (uiop:native-namestring output-path)))
    :policy policy :marker +numeric-receipt-marker+
-   :accept (lambda (form) (%numeric-accept-result form program-id))
+   :accept (lambda (form) (%numeric-accept-result form program-id value-type))
    :metadata (list :backend :eshkol-numeric :mode :aot-run :program-id program-id)))
 
 (defun %gate-eshkol-numeric (surface &key eshkol-command aot-run-prefix (policy (%default-policy)))
   (multiple-value-bind (source program-id program) (emit-eshkol-numeric-source surface)
-    (declare (ignore program))
     (let ((command (%command eshkol-command))
+          (value-type (%numeric-main-type program))
           (aot-prefix (%argv-prefix aot-run-prefix "AOT-RUN-PREFIX")))
       (multiple-value-bind (available availability-envelope)
           (eshkol-available-p :eshkol-command command :policy policy)
@@ -629,12 +684,12 @@ under +DEFAULT-ULP-BOUND+ against the direct evaluator (the reference)."
                                    :external-format :utf-8)
                    (write-string source source-stream))
                  (%make-source-container-readable source-path)
-                 (let* ((jit (%require-success :jit (%run-numeric-jit source-path program-id command policy)))
+                 (let* ((jit (%require-success :jit (%run-numeric-jit source-path program-id value-type command policy)))
                         (aot-compile (%require-success :aot-compile
                                        (%compile-aot source-path output-path program-id command policy))))
                    (unless (probe-file output-path)
                      (error 'eshkol-backend-error :stage :aot-compile :status :missing-artifact :envelope aot-compile))
-                   (let* ((aot (%require-success :aot-run (%run-numeric-aot output-path program-id policy aot-prefix)))
+                   (let* ((aot (%require-success :aot-run (%run-numeric-aot output-path program-id value-type policy aot-prefix)))
                           (jit-value (%receipt-value jit)) (aot-value (%receipt-value aot))
                           (passed (%numeric-values-agree-p direct kernel jit-value aot-value)))
                      (setf completed-p t)

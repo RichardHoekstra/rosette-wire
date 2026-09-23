@@ -45,6 +45,14 @@ natural unit for comparing two computations that should be the same IEEE-754
 double, not merely close. This is stricter than a magnitude-relative
 tolerance and looser than exact equality, which is what a differently
 ordered but IEEE-correctly-rounded evaluation of the same expression needs.
+A `:float` readout crosses the process boundary as the exact double, not its
+decimal display: the emitted program scales it by powers of two into
+`(:dyadic m e)` with `2^52 <= m < 2^53` (value `m * 2^e`, optionally wrapped in
+`(:negative ...)`), and the gate refuses a decimal literal, a non-finite value,
+or a receipt whose `:value-type` differs from the type `main` was admitted at.
+Eshkol's `display` rounds `(+ 0.1 0.2)` to `0.3`, one ulp from the computed
+value, so a decimal readout would let lossy printing pass the ulp regime.
+
 A central-difference numerical approximation of a derivative is a different
 kind of readout (an O(h^2) approximation, not another exact evaluation of the
 same expression) and is compared against a plain absolute tolerance instead.

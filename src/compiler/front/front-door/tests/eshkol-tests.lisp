@@ -40,7 +40,7 @@ below falls back to a direct invocation there rather than skip entirely."
   (ignore-errors
    (let ((process (sb-ext:run-program "prlimit" '("--version") :search t
                                        :output nil :error nil :wait t)))
-     (and process (integerp (sb-ext:process-exit-code process))))))
+     (and process (eql 0 (sb-ext:process-exit-code process))))))
 
 (defun signals-backend-error-p (thunk)
   (handler-case (progn (funcall thunk) nil)
@@ -407,7 +407,27 @@ processes or the outer Docker client can be refused before launch."
       ;; than the ulp regime above (which states exactness for the direct/
       ;; kernel/JIT/AOT foursome, not for a numerical-differentiation oracle).
       (check derivative-agrees-with-central-difference
-             (< (abs (- direct (central-difference (lambda (x) (* x x x)) 2.0d0))) 1d-4))))
+             (< (abs (- direct (central-difference (lambda (x) (* x x x)) 2.0d0))) 1d-4)))
+    ;; The dual evaluator and the kernel walk share the quotient rule, so the
+    ;; central difference is the independent check for it: d/dx x/(x+1) at 2
+    ;; is 1/(x+1)^2 = 1/9.
+    (multiple-value-bind (passed direct kernel)
+        (esh:numeric-gate '((defun-numeric ratio (x) (/ x (+ x 1.0d0)))
+                             (main-numeric (derivative ratio 2.0d0))))
+      (check derivative-quotient-rule-dual-evaluator-agrees
+             (and passed (= kernel direct) (esh:within-ulp-p direct (/ 1d0 9d0))))
+      (check derivative-quotient-rule-agrees-with-central-difference
+             (< (abs (- direct (central-difference (lambda (x) (/ x (+ x 1d0))) 2.0d0))) 1d-8))))
+
+  ;; NUMERIC-PROGRAM-EVAL re-checks the whole program, so a MAIN that calls a
+  ;; DEFUN-NUMERIC through DERIVATIVE evaluates instead of being refused.
+  (check numeric-program-eval-keeps-helper-functions
+         (handler-case
+             (= 12.0d0 (esh::numeric-program-eval
+                        (esh::%parse-numeric-surface
+                         '((defun-numeric cube (x) (* (* x x) x))
+                           (main-numeric (derivative cube 2.0d0))))))
+           (error () nil)))
 
   ;; Forward-mode GRADIENT: d/dy (x^2+y^3) at (2,3) is 3*y^2=27.
   (multiple-value-bind (passed direct kernel)
@@ -420,6 +440,21 @@ processes or the outer Docker client can be refused before launch."
   (check rational-negative-case-literal-zero-denominator-refused
          (handler-case
              (progn (esh:emit-eshkol-numeric-source '((main-numeric (/ 1 0)))) nil)
+           (esh:numeric-dialect-refusal () t)))
+
+  ;; A zero denominator the term computes is refused by both evaluators, not
+  ;; left to CL's DIVISION-BY-ZERO.
+  (check rational-negative-case-computed-zero-denominator-refused
+         (handler-case (progn (esh:numeric-gate '((main-numeric (/ 1 (- 1 1))))) nil)
+           (esh:numeric-dialect-refusal () t)))
+  (check float-negative-case-computed-zero-denominator-refused
+         (handler-case (progn (esh:numeric-gate '((main-numeric (/ 1.0d0 (- 1.0d0 1.0d0))))) nil)
+           (esh:numeric-dialect-refusal () t)))
+  (check kernel-refuses-computed-zero-denominator
+         (handler-case
+             (progn (esh::numeric-kernel-run
+                     (esh::%make-numeric-program :funs '() :main '(/ 1 (- 1 1))))
+                    nil)
            (esh:numeric-dialect-refusal () t)))
 
   (check float-negative-case-mixed-exact-inexact-refused
@@ -552,11 +587,24 @@ processes or the outer Docker client can be refused before launch."
                       (ignore-errors (delete-file path))
                       (format t "~&  INFO    ~A => ~A~%" (getf case :name) (string-trim '(#\Space) (or value-line "")))
                       (check-anon (format nil "real-eshkol-numeric-direct-~A" (getf case :name))
-                       (let ((*read-default-float-format* 'double-float))
-                         (handler-case
-                             (= (read-from-string (string-trim '(#\Space) value-line))
-                                (getf case :expected))
-                           (error () nil))))))))))
+                       ;; The last line is the whole receipt: marker, then the
+                       ;; plist. Decode :VALUE the way the worker path does.
+                       (handler-case
+                           (let* ((marker (string-trim '(#\Space) esh::+numeric-receipt-marker+))
+                                  (start (search marker value-line))
+                                  (form (and start
+                                             (let ((*read-eval* nil))
+                                               (read-from-string value-line t nil
+                                                                 :start (+ start (length marker))))))
+                                  (decoded (and (consp form)
+                                                (esh::%decode-numeric-readout
+                                                 (getf form :value) (getf form :value-type))))
+                                  (expected (getf case :expected)))
+                             (and decoded
+                                  (if (typep expected 'double-float)
+                                      (esh:within-ulp-p decoded expected)
+                                      (eql decoded expected))))
+                         (error () nil)))))))))
         (format t "~&  SKIP  real Eshkol numeric-dialect JIT/AOT ~
 (ROSETTE_ESHKOL_BIN and ROSETTE_ESHKOL_CONTAINER unset)~%")))
 

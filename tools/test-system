@@ -13,4 +13,26 @@
      :ignore-inherited-configuration))
   (asdf:initialize-source-registry
    `(:source-registry (:tree ,root) :ignore-inherited-configuration))
-  (asdf:test-system (first args)))
+  (let* ((name (string-downcase (first args)))
+         (primary (asdf:primary-system-name name))
+         ;; Finding the primary system loads its .asd, which registers every
+         ;; secondary system (e.g. front-door/tests, front-door/eshkol/tests).
+         (suites (progn
+                   (asdf:find-system primary)
+                   (sort (remove-if-not
+                          (lambda (system)
+                            (and (uiop:string-prefix-p (format nil "~A/" primary) system)
+                                 (uiop:string-suffix-p system "/tests")))
+                          (asdf:registered-systems))
+                         #'string<))))
+    (unwind-protect (asdf:test-system name)
+      ;; A test suite has run iff test-op loaded its system. Report which ones
+      ;; did, so a count is never mistaken for coverage it doesn't include.
+      (let ((ran (remove-if-not #'asdf:component-loaded-p suites))
+            (skipped (remove-if #'asdf:component-loaded-p suites)))
+        (format t "~&test-system ~A: ran ~:[no registered suites~;~:*~{~A~^, ~}~]~%"
+                name ran)
+        (when skipped
+          (format t "test-system ~A: did NOT run ~{~A~^, ~} -- ~
+                     use `tools/test-system ~A` to run every suite of ~A~%"
+                  name skipped primary primary))))))

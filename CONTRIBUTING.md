@@ -11,7 +11,15 @@ tools/test-system front-door
 make contributor-check
 ```
 
-The focused command loads the checkout's registry and tests one ASDF system.
+The focused command loads the checkout's registry and tests one ASDF system,
+then lists the test suites it ran. Name the primary system (`front-door`, not
+`front-door/tests`) to run all of its suites; the tool names any it skipped.
+
+Adapter checks against a real external toolchain are opt-in. For Eshkol, set
+`ROSETTE_ESHKOL_BIN=/path/to/eshkol-run`, or `ROSETTE_ESHKOL_CONTAINER=<name>`
+for a running container with `/eshkol/build/eshkol-run` and the host's
+temporary directory mounted at the same path. The isolated worker needs the
+Linux `prlimit` utility; without it these checks cannot run under isolation.
 `contributor-check` runs all public systems, CLI and example checks, documentation
 links, and hygiene. PR CI runs this target. Add a negative control when changing
 identity, capability, verifier, or refusal behavior.

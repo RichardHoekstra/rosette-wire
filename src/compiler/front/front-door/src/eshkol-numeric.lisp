@@ -264,6 +264,15 @@ one (MAIN-NUMERIC term)) and return a type-checked NUMERIC-PROGRAM."
                                        (* (dual-value a) (dual-epsilon b)))
                                     (* (dual-value b) (dual-value b))))))
 
+(defun %numeric-check-denominator (value term stage)
+  "Refuse a zero denominator that a term COMPUTED (the literal case is refused
+at type-check). Eshkol raises on an exact zero and returns a non-finite double
+for an inexact one; neither is a value this dialect's readout admits, so both
+evaluators refuse it the same way instead of letting CL signal
+DIVISION-BY-ZERO."
+  (when (zerop value)
+    (%numeric-refuse stage term "division by a computed zero denominator is refused")))
+
 (defun eval-numeric-term (term env funs)
   "The direct evaluator. ENV binds symbol-name -> a CL number OR (during
 forward-mode AD) a DUAL. FUNS is NUMERIC-PROGRAM-FUNS."
@@ -284,6 +293,8 @@ forward-mode AD) a DUAL. FUNS is NUMERIC-PROGRAM-FUNS."
          ((member (symbol-name head) '("+" "-" "*" "/") :test #'string=)
           (let ((a (eval-numeric-term (second term) env funs))
                 (b (eval-numeric-term (third term) env funs)))
+            (when (%num-name= head "/")
+              (%numeric-check-denominator (if (dual-p b) (dual-value b) b) term :eval))
             (if (or (dual-p a) (dual-p b))
                 (cond ((%num-name= head "+") (dual+ a b))
                       ((%num-name= head "-") (dual- a b))
@@ -324,15 +335,20 @@ forward-mode AD) a DUAL. FUNS is NUMERIC-PROGRAM-FUNS."
 
 (defun numeric-program-eval (program)
   "Type-check and directly evaluate PROGRAM's MAIN-NUMERIC term."
-  (%parse-numeric-surface (list (list 'main-numeric (numeric-program-main program))))
+  ;; Re-check the whole program, helpers included: MAIN may call DERIVATIVE or
+  ;; GRADIENT on a DEFUN-NUMERIC, which a MAIN-only surface cannot resolve.
+  (%parse-numeric-surface
+   (append (mapcar (lambda (entry) (cons 'defun-numeric entry))
+                   (numeric-program-funs program))
+           (list (list 'main-numeric (numeric-program-main program)))))
   (eval-numeric-term (numeric-program-main program) '() (numeric-program-funs program)))
 
 ;;; -------------------------------------------------------------------------
 ;;; Coincidence 2: the kernel-VM oracle, written independently.
 ;;;
-;;; This is NOT eval-numeric-term wearing a different name: it walks tagged
-;;; values (:INT n), (:RAT num den), (:FLT d), (:DUAL v e) and dispatches on
-;;; the tag symbol, mirroring the explicit tag discipline rosette-core-term's
+;;; This is NOT eval-numeric-term wearing a different name: it walks kernel
+;;; values -- plain CL integers, ratios and doubles, which carry their own type,
+;;; and (:DUAL v e) lists during AD -- and dispatches on %KERNEL-TAG, mirroring the explicit tag discipline rosette-core-term's
 ;;; self-interpreters (selfeval.lisp, selfeval-f.lisp) use for their own
 ;;; cross-checked oracle. Two differently written walks landing on the same
 ;;; answer is the actual coincidence being gated, exactly as eshkol.lisp gates
@@ -386,10 +402,13 @@ value (a plain CL number, or a (:DUAL value epsilon) list during AD)."
             (kernel-eval-numeric-term (fourth term)
                                        (cons (cons (symbol-name (second term)) v) env) funs)))
          ((member (symbol-name head) '("+" "-" "*" "/") :test #'string=)
-          (%kernel-binop (cond ((%num-name= head "+") #'+) ((%num-name= head "-") #'-)
-                                ((%num-name= head "*") #'*) (t #'/))
-                         (kernel-eval-numeric-term (second term) env funs)
-                         (kernel-eval-numeric-term (third term) env funs)))
+          (let ((a (kernel-eval-numeric-term (second term) env funs))
+                (b (kernel-eval-numeric-term (third term) env funs)))
+            (when (%num-name= head "/")
+              (%numeric-check-denominator (%kernel-num b) term :kernel-eval))
+            (%kernel-binop (cond ((%num-name= head "+") #'+) ((%num-name= head "-") #'-)
+                                  ((%num-name= head "*") #'*) (t #'/))
+                           a b)))
          ((member (symbol-name head) '("<" ">" "=") :test #'string=)
           (let ((a (%kernel-num (kernel-eval-numeric-term (second term) env funs)))
                 (b (%kernel-num (kernel-eval-numeric-term (third term) env funs))))
@@ -442,7 +461,7 @@ Returns three values: PASSED-P, DIRECT-VALUE, KERNEL-VALUE."
           (declare (ignore significand sign))
           (scale-float 1d0 (- exponent 53))))))
 
-(defparameter +default-ulp-bound+ 2
+(defconstant +default-ulp-bound+ 2
   "Two ulps of slack: enough to cross a differently ordered but IEEE-correctly
 rounded evaluation of the SAME expression, tight enough to catch a genuinely
 different numeric regime (a different rounding mode, an extra intermediate
@@ -471,9 +490,8 @@ BOUND and the cross-checks against real Eshkol below are stated against."
 
 (defun %format-double (value)
   "Render a CL double-float as a plain decimal Eshkol reads back as the SAME
-double: no exponent/type marker, so Eshkol's reader (confirmed by running
-eshkol-run directly, see .scratch/) parses it as a double, not a rational or
-a single-float. ~F does not truncate a double's significant digits."
+double: no exponent/type marker, so Eshkol's reader parses it as a double,
+not a rational or a single-float. ~F does not truncate a double's significant digits."
   (format nil "~F" value))
 
 (defun %emit-numeric-literal (value stream)
@@ -538,10 +556,11 @@ a single-float. ~F does not truncate a double's significant digits."
   (infer-numeric-type (numeric-program-main program) '() (numeric-program-funs program)))
 
 ;;; A :FLOAT readout must reach the gate as the exact double Eshkol computed,
-;;; not as its decimal DISPLAY: Eshkol prints (+ 0.1 0.2) as 0.3, which the
-;;; ulp regime would then accept one ulp away. Nor can it go through Eshkol's
-;;; INEXACT->EXACT, which converts over a fixed 2^52 denominator (0.1 comes
-;;; back as 450359962737049/2^52). The helper below instead scales |x| by
+;;; not as its decimal DISPLAY: through 1.3.3 Eshkol prints (+ 0.1 0.2) as
+;;; 0.3, which the ulp regime would then accept one ulp away. Nor can it go through Eshkol's
+;;; INEXACT->EXACT on the value itself: through 1.3.3 it converts over a fixed
+;;; 2^52 denominator (0.1 comes back as 450359962737049/2^52); 1.3.5 converts
+;;; exactly, and the readout below is correct on both. The helper below instead scales |x| by
 ;;; powers of two -- exact in IEEE arithmetic, subnormals included -- into an
 ;;; integer mantissa m in [2^52, 2^53) and prints (:dyadic m e), x = m*2^e.
 ;;; INEXACT->EXACT is then applied only to that integer-valued double.
